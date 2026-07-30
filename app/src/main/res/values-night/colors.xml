@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色界面保留层级差和柔和对比，避免对浅色资源做机械反转。 -->
+    <color name="primary">#7EA2FF</color>
+    <color name="primary_dark">#5F86EB</color>
+    <color name="primary_soft">#25345C</color>
+    <color name="jade_primary">#57C79A</color>
+    <color name="jade_primary_dark">#3BAE80</color>
+    <color name="jade_primary_soft">#1D3D32</color>
+    <color name="purple_primary">#AD9AF2</color>
+    <color name="purple_primary_dark">#8B78D6</color>
+    <color name="purple_primary_soft">#312B50</color>
+    <color name="accent">#7EA2FF</color>
+    <color name="page_background">#10131A</color>
+    <color name="surface">#181D27</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="text_primary">#F1F4F8</color>
+    <color name="text_secondary">#B0BAC9</color>
+    <color name="text_tertiary">#7E899A</color>
+
+    <!-- 状态色在暗背景上适当提亮，同时保留绿、橙、红的固定业务语义。 -->
+    <color name="status_normal">#57C79A</color>
+    <color name="status_normal_soft">#1D3B31</color>
+    <color name="status_warning">#F2B45F</color>
+    <color name="status_warning_soft">#3D2D18</color>
+    <color name="status_danger">#FF8A8A</color>
+    <color name="status_danger_soft">#432326</color>
+    <color name="status_neutral_soft">#252B36</color>
+    <color name="border">#303846</color>
+    <color name="divider">#272E39</color>
+    <color name="segment_background">#11161E</color>
+    <color name="chart_grid">#2A3342</color>
+    <color name="chart_missing">#596477</color>
+    <color name="chart_recharge">#F2B45F</color>
+    <color name="disabled">#596273</color>
+</resources>

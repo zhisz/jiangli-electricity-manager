@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppThemeBase" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/page_background</item>
+        <item name="android:navigationBarColor">@color/page_background</item>
+        <item name="android:statusBarColor">@color/page_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- 默认学院蓝继续使用原品牌色，老用户升级后视觉不会突然变化。 -->
+    <style name="AppTheme" parent="AppThemeBase">
+        <item name="android:colorAccent">@color/primary</item>
+        <item name="uiPrimary">@color/primary</item>
+        <item name="uiPrimaryDark">@color/primary_dark</item>
+        <item name="uiPrimarySoft">@color/primary_soft</item>
+    </style>
+
+    <style name="AppTheme.Jade" parent="AppThemeBase">
+        <item name="android:colorAccent">@color/jade_primary</item>
+        <item name="uiPrimary">@color/jade_primary</item>
+        <item name="uiPrimaryDark">@color/jade_primary_dark</item>
+        <item name="uiPrimarySoft">@color/jade_primary_soft</item>
+    </style>
+
+    <style name="AppTheme.Purple" parent="AppThemeBase">
+        <item name="android:colorAccent">@color/purple_primary</item>
+        <item name="uiPrimary">@color/purple_primary</item>
+        <item name="uiPrimaryDark">@color/purple_primary_dark</item>
+        <item name="uiPrimarySoft">@color/purple_primary_soft</item>
+    </style>
+
+    <style name="Ui.Text.PageTitle" parent="android:style/Widget.TextView">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">28sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Ui.Text.SectionTitle" parent="android:style/Widget.TextView">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Ui.Text.Body" parent="android:style/Widget.TextView">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+    </style>
+
+    <style name="Ui.Button.Primary" parent="android:style/Widget.Material.Button">
+        <item name="android:background">@drawable/button_primary_background</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:minWidth">@dimen/touch_min</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Ui.Button.Secondary" parent="android:style/Widget.Material.Button">
+        <item name="android:background">@drawable/button_secondary_background</item>
+        <item name="android:textColor">?attr/uiPrimary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:minWidth">@dimen/touch_min</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Ui.Button.Text" parent="android:style/Widget.Material.Button.Borderless">
+        <item name="android:background">@drawable/button_text_background</item>
+        <item name="android:textColor">?attr/uiPrimary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:minWidth">@dimen/touch_min</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Ui.Button.DangerText" parent="Ui.Button.Text">
+        <item name="android:textColor">@color/status_danger</item>
+    </style>
+
+    <style name="Ui.EditText" parent="android:style/Widget.Material.EditText">
+        <item name="android:background">@drawable/edit_text_background</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorHint">@color/text_tertiary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingBottom">10dp</item>
+    </style>
+
+    <style name="Ui.SegmentButton" parent="android:style/Widget.Material.CompoundButton.RadioButton">
+        <item name="android:button">@null</item>
+        <item name="android:background">@drawable/segment_item_background</item>
+        <item name="android:textColor">@color/segment_text</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">10dp</item>
+    </style>
+</resources>

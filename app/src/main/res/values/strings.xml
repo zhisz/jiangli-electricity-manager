@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动器和系统设置使用简短正式名称；首页标题额外标明服务校区。 -->
+    <string name="app_name">江理电费管家</string>
+    <string name="app_home_title">江理电费管家（南昌校区）</string>
+    <string name="developer_signature">开发者 zhiSZ</string>
+    <string name="feedback_email">反馈邮箱：3357627169@qq.com</string>
+    <string name="feedback_email_address">3357627169@qq.com</string>
+    <string name="feedback_email_subject">江理电费管家反馈</string>
+    <string name="online_recharge_button">电费充值</string>
+    <string name="recharge_amount_hint">输入充值金额</string>
+    <string name="recharge_amount_range_hint">输入金额（%1$s–%2$s）</string>
+    <string name="recharge_suggestion_format">%1$s 元</string>
+    <string name="recharge_payment_title">电费充值</string>
+    <string name="recharge_payment_close">‹ 关闭</string>
+    <string name="recharge_payment_close_plain">关闭</string>
+    <string name="recharge_payment_connecting">正在打开微信支付…</string>
+    <string name="recharge_payment_loading">正在打开微信支付…</string>
+    <string name="recharge_payment_ready">请按页面提示完成支付</string>
+    <string name="recharge_payment_web_content">校付宝官方支付页面</string>
+    <string name="recharge_payment_browser_fallback_short">改用浏览器</string>
+    <string name="recharge_payment_error_title">支付页面未能继续</string>
+    <string name="recharge_payment_ssl_error">官方支付页面的安全证书校验失败，已停止加载。请勿继续付款，稍后重试。</string>
+    <string name="recharge_payment_network_error">支付页面网络加载失败，请检查网络后重新进入</string>
+    <string name="recharge_payment_renderer_error">支付页面组件异常退出，已安全停止本次页面。请返回后确认是否存在处理中订单。</string>
+    <string name="recharge_payment_blocked_url">支付页面尝试打开非白名单地址，已为你阻止。请勿在来源不明的页面输入付款信息。</string>
+    <string name="recharge_payment_wechat_missing">没有找到可处理支付指令的微信 App。请确认已安装并启用微信，或使用浏览器备用方式。</string>
+    <string name="recharge_payment_wechat_failed">系统拒绝将支付指令交给微信。你可以使用浏览器备用方式继续。</string>
+    <string name="recharge_payment_browser_failed">无法打开系统浏览器，请确认手机已安装可用浏览器。</string>
+</resources>

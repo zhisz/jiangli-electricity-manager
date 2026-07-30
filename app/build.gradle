@@ -1,0 +1,65 @@
+plugins {
+    id "com.android.application"
+}
+
+/*
+ * 公开仓库中的 gradle.properties 只保存空配置。开发者自己的地址和校付宝会话值放在
+ * 已被 Git 忽略的 local.properties 中；CI 也可以改用同名 Gradle 属性注入。
+ * 这样生产能力与开源代码解耦，不会因为一次 git add 泄露线上地址或会话凭据。
+ */
+def localConfig = new Properties()
+def localConfigFile = rootProject.file("local.properties")
+if (localConfigFile.isFile()) {
+    localConfigFile.withInputStream { localConfig.load(it) }
+}
+def privateSetting = { String name ->
+    String localValue = localConfig.getProperty(name, "").trim()
+    return localValue.isEmpty()
+            ? providers.gradleProperty(name).orElse("").get()
+            : localValue
+}
+def javaString = { String value ->
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+def updateManifestUrl = javaString(privateSetting("UPDATE_MANIFEST_URL"))
+def elecServiceBaseUrl = javaString(privateSetting("ELEC_SERVICE_BASE_URL"))
+def xiaofubaoShiroJid = javaString(privateSetting("XIAOFUBAO_SHIRO_JID"))
+
+android {
+    namespace = "com.shangzhili.electricityreminder"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.shangzhili.electricityreminder"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 30
+        versionName = "0.21.0"
+        buildConfigField "String", "UPDATE_MANIFEST_URL", "\"${updateManifestUrl}\""
+        buildConfigField "String", "ELEC_SERVICE_BASE_URL", "\"${elecServiceBaseUrl}\""
+        buildConfigField "String", "XIAOFUBAO_SHIRO_JID", "\"${xiaofubaoShiroJid}\""
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+dependencies {
+    implementation "androidx.work:work-runtime:2.11.2"
+    testImplementation "junit:junit:4.13.2"
+    // JVM 单元测试需要真实 org.json 实现，以回归校付宝订单响应的严格字段校验。
+    testImplementation "org.json:json:20240303"
+}

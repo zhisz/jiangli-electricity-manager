@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    充值金额页只保留“推荐金额 + 自定义金额”两个任务。
+    房间合法性、可充值状态和金额范围已经在显示此页面前由只读接口完成校验。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/space_6"
+    android:paddingTop="@dimen/space_2"
+    android:paddingEnd="@dimen/space_6"
+    android:paddingBottom="@dimen/space_2">
+
+    <!-- 推荐项由服务端配置动态生成；一行三项，小屏和大字体下仍保留足够触控区域。 -->
+    <LinearLayout
+        android:id="@+id/rechargeSuggestedAmountsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+    <EditText
+        android:id="@+id/onlineRechargeAmountInput"
+        style="@style/Ui.EditText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_3"
+        android:digits="0123456789."
+        android:hint="@string/recharge_amount_hint"
+        android:imeOptions="actionDone"
+        android:importantForAutofill="no"
+        android:inputType="numberDecimal"
+        android:maxLines="1" />
+
+</LinearLayout>

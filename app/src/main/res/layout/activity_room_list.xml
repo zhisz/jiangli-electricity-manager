@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 首页只保留房间概览和两个全局入口；房间业务操作全部留在详情页。 -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/page_horizontal"
+        android:paddingTop="20dp"
+        android:paddingEnd="@dimen/page_horizontal"
+        android:paddingBottom="@dimen/space_6">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/Ui.Text.PageTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_home_title" />
+
+                <TextView
+                    android:id="@+id/roomCountText"
+                    style="@style/Ui.Text.Body"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_1"
+                    android:text="共 0 个房间" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/systemSettingsButton"
+                style="@style/Ui.Button.Text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="● 设置" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/addRoomButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_4"
+            android:text="＋ 添加房间" />
+
+        <TextView
+            android:id="@+id/reorderHintText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_3"
+            android:text="长按卡片可调整房间顺序"
+            android:textColor="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/emptyText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="64dp"
+            android:gravity="center"
+            android:lineSpacingExtra="6dp"
+            android:text="还没有房间\n添加后即可查看余额和监测状态"
+            android:textColor="@color/text_secondary"
+            android:textSize="16sp" />
+
+        <LinearLayout
+            android:id="@+id/roomsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
+</ScrollView>

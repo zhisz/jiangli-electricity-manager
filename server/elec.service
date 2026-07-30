@@ -1,0 +1,25 @@
+[Unit]
+Description=Jiangli Electricity update and anonymous analytics service
+After=network.target
+
+[Service]
+Type=simple
+User=jiangli-electricity
+Group=jiangli-electricity
+WorkingDirectory=/srv/jiangli-electricity/current
+EnvironmentFile=/etc/jiangli-electricity.env
+ExecStart=/usr/bin/python3 /srv/jiangli-electricity/current/server/server.py
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jiangli-electricity
+MemoryMax=192M
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

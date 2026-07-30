@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 三个品牌属性由当前 AppTheme 提供，控件和自绘图表都从主题解析，不再锁死蓝色。 -->
+    <attr name="uiPrimary" format="color" />
+    <attr name="uiPrimaryDark" format="color" />
+    <attr name="uiPrimarySoft" format="color" />
+</resources>

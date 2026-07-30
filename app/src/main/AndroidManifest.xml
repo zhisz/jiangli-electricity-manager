@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 下载完成后调用系统安装器更新本 App；Android 8+ 会另外要求用户授权此来源。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 重启后恢复每整点采样计划。 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 12+ 精确到分钟需要用户在“闹钟和提醒”页面允许此特殊权限。 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!--
+        支付过渡页使用显式包名把经过校验的 weixin://wap/pay 指令交给微信。
+        Android 11+ 的包可见性默认收紧，因此只声明微信这一项，不查询其他已安装应用。
+    -->
+    <queries>
+        <package android:name="com.tencent.mm" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@drawable/ic_app"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".RoomDetailActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SystemSettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UsageStatisticsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".RechargeRecordsActivity"
+            android:exported="false" />
+
+        <!-- 仅接收本应用内 Intent，防止其他 App 把任意网页塞入充值专用 WebView。 -->
+        <activity
+            android:name=".RechargePaymentActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true" />
+
+        <!-- 显式 PendingIntent 只会投递给本应用，因此不对其他 App 导出。 -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false" />
+
+        <!-- 低余额后按分钟复查；与整点闹钟使用不同的 PendingIntent，互不覆盖。 -->
+        <receiver
+            android:name=".RepeatAlarmReceiver"
+            android:exported="false" />
+
+        <!-- 系统时间环境变化后重新计算下一整点。 -->
+        <receiver
+            android:name=".RescheduleReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

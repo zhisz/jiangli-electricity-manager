@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/page_horizontal">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/settingsBackButton"
+                style="@style/Ui.Button.Text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:text="‹ 返回" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="设置与检查"
+                android:textColor="@color/text_primary"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 主题只影响视觉资源；房间配置、闹钟和历史数据完全独立。 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_3"
+            android:background="@drawable/room_card_background"
+            android:orientation="vertical"
+            android:padding="@dimen/card_padding">
+
+            <TextView
+                style="@style/Ui.Text.SectionTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="外观主题" />
+
+            <TextView
+                style="@style/Ui.Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_1"
+                android:text="主题色与显示模式可自由组合，选择后立即应用。" />
+
+            <TextView
+                style="@style/Ui.Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_3"
+                android:text="主题色"
+                android:textStyle="bold" />
+
+            <RadioGroup
+                android:id="@+id/themeModeGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_3"
+                android:background="@drawable/segment_container_background"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/themeBlueRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="学院蓝" />
+
+                <RadioButton
+                    android:id="@+id/themeJadeRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="清新绿" />
+
+                <RadioButton
+                    android:id="@+id/themePurpleRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="静雅紫" />
+            </RadioGroup>
+
+            <TextView
+                style="@style/Ui.Text.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_3"
+                android:text="显示模式"
+                android:textStyle="bold" />
+
+            <!-- 显示模式和主题色使用两个独立 RadioGroup，用户可任意组合。 -->
+            <RadioGroup
+                android:id="@+id/appearanceModeGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_1"
+                android:background="@drawable/segment_container_background"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/appearanceSystemRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="跟随系统" />
+
+                <RadioButton
+                    android:id="@+id/appearanceLightRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="浅色" />
+
+                <RadioButton
+                    android:id="@+id/appearanceDarkRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="深色" />
+            </RadioGroup>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/overallStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/status_background"
+            android:padding="@dimen/card_padding"
+            android:text="正在检查系统设置……"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/notificationStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="通知权限与通知渠道"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/openNotificationSettingsButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="设置通知权限" />
+
+        <TextView
+            android:id="@+id/exactAlarmStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="精确闹钟权限"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/openExactAlarmSettingsButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="设置精确闹钟" />
+
+        <TextView
+            android:id="@+id/batteryStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="忽略系统电池优化"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/openBatterySettingsButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="设置电池策略" />
+
+        <TextView
+            android:id="@+id/autoStartStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="厂商自启动"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="vivo、OPPO、小米等系统没有统一的自启动检测接口。请在系统应用设置中允许本 App 自启动，然后手动确认。"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/openAutoStartSettingsButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="打开本 App 系统设置" />
+
+        <Button
+            android:id="@+id/autoStartConfirmButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="我已在系统中开启自启动" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="这些设置只需配置一次。系统升级、清理权限或重新安装后，可从首页右上角重新检查。"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <!--
+          署名和反馈入口放在页面最底部，保持低视觉权重，不干扰上方系统设置任务。
+          邮箱仍满足 48dp 触控高度，方便用户直接唤起邮件应用。
+        -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_6"
+            android:gravity="center"
+            android:text="@string/developer_signature"
+            android:textColor="@color/text_tertiary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/feedbackEmailButton"
+            style="@style/Ui.Button.Text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_1"
+            android:layout_marginBottom="28dp"
+            android:text="@string/feedback_email"
+            android:textColor="@color/text_secondary" />
+
+    </LinearLayout>
+</ScrollView>

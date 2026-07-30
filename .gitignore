@@ -1,0 +1,13 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+*.jks
+*.keystore
+.DS_Store
+artifacts/
+releases/
+update-manifest.production.json
+deploy/nginx-elec-production.conf
+deploy/*verification*.txt

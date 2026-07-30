@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#2457D6</color>
+    <color name="primary_dark">#173B95</color>
+    <color name="primary_soft">#EEF3FF</color>
+    <color name="jade_primary">#16875B</color>
+    <color name="jade_primary_dark">#0F6846</color>
+    <color name="jade_primary_soft">#EAF7F1</color>
+    <color name="purple_primary">#6957B8</color>
+    <color name="purple_primary_dark">#4F3F96</color>
+    <color name="purple_primary_soft">#F0EDFA</color>
+    <color name="accent">#2457D6</color>
+    <color name="page_background">#F5F7FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="text_primary">#17223B</color>
+    <color name="text_secondary">#667085</color>
+    <color name="text_tertiary">#98A2B3</color>
+    <color name="status_normal">#16875B</color>
+    <color name="status_normal_soft">#EAF7F1</color>
+    <color name="status_warning">#D97706</color>
+    <color name="status_warning_soft">#FFF4E5</color>
+    <color name="status_danger">#C62828</color>
+    <color name="status_danger_soft">#FDECEC</color>
+    <color name="status_neutral_soft">#F0F2F5</color>
+    <color name="border">#E4E9F2</color>
+    <color name="divider">#EDF0F5</color>
+    <color name="segment_background">#F0F3F8</color>
+    <color name="chart_grid">#E8EDF5</color>
+    <color name="chart_missing">#CBD2E0</color>
+    <color name="chart_recharge">#D97706</color>
+    <color name="disabled">#B8C0CE</color>
+</resources>
