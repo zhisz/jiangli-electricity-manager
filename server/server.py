@@ -1503,7 +1503,8 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         f'<div class="stat-item"><span>{html.escape(label)}</span>'
         f'<strong>{html.escape(str(value))}</strong></div>'
         for label, value in (
-            ("本轮应采", total), ("本轮已处理", processed),
+            ("总采集数", task["total_samples"]),
+            ("总失败数", task["total_failure_samples"]),
             ("本轮成功", success), ("本轮失败", failure),
             ("成功率", f"{success_rate:.2f}%"),
             ("本轮耗时", duration),
@@ -1558,7 +1559,7 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         <div class="progress-track"><span style="width:{progress_percent:.2f}%"></span></div>
       </div>
       <div class="stats-strip">{statistics}</div>
-      <p class="task-storage-note">近30天累计 {task["total_samples"]} 条样本 · 数据库
+      <p class="task-storage-note">统计范围为服务器最近30天 · 数据库
         {_format_bytes(int(task["database_bytes"]))}</p>
       <details class="expandable coverage-expand">
         <summary class="coverage-summary">
@@ -1627,8 +1628,7 @@ def collector_distribution_fragment(
     )
     return f"""
       <div class="section-heading distribution-heading"><div>
-        <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2>
-        <p class="muted">各时段监测到余额发生变化的房间数量。</p></div>
+        <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2></div>
         <div class="date-nav"><button class="secondary" type="button" data-day-step="-1">上一天</button>
           <input id="distribution-date" type="date" value="{html.escape(distribution["day"])}">
           <button class="secondary" type="button" data-day-step="1">下一天</button>
@@ -2057,27 +2057,28 @@ def page_shell(title: str, content: str) -> str:
     .is-loading {{ opacity:.48; pointer-events:none; transition:opacity .15s ease; }}
     .empty-state {{ padding:32px 12px; text-align:center; color:var(--muted); }}
     .error-state {{ color:var(--danger); }}
-    .distribution-heading {{ display:grid; grid-template-columns:1fr; align-items:start; gap:10px; margin-bottom:12px; }}
+    .distribution-heading {{ display:grid; grid-template-columns:1fr; align-items:start; gap:8px; margin-bottom:8px; }}
     .date-nav {{ flex-wrap:nowrap; justify-content:flex-start; gap:7px; }}
-    .date-nav input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+    .date-nav button {{ min-height:40px; padding:7px 13px; }}
+    .date-nav input {{ min-height:40px; padding:7px 10px; border:1px solid var(--border);
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
-    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:8px 20px; padding:10px 12px;
-      border:1px solid var(--border); border-radius:12px; margin-bottom:8px; color:var(--muted); }}
+    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:8px 20px; padding:8px 12px;
+      border:1px solid var(--border); border-radius:12px; margin-bottom:6px; color:var(--muted); }}
     .distribution-summary strong {{ color:var(--text); margin-right:4px; }}
-    .interval-list {{ display:grid; gap:2px; }}
+    .interval-list {{ display:grid; gap:1px; }}
     .interval-card {{ display:grid; grid-template-columns:112px minmax(80px,1fr) 176px; align-items:center;
-      gap:12px; min-height:32px; padding:5px 10px; text-align:left; background:var(--surface); color:var(--text);
+      gap:12px; min-height:36px; padding:7px 10px; text-align:left; background:var(--surface); color:var(--text);
       border:1px solid transparent; border-radius:9px; font-weight:400; }}
     .interval-card:hover,.interval-card.selected {{ border-color:var(--primary); background:var(--soft); }}
     .interval-card.has-abnormal {{ border-color:#d97706; }}
-    .interval-time {{ font-size:12px; }}
-    .interval-track {{ height:7px; background:var(--soft); border-radius:999px; overflow:hidden; }}
+    .interval-time {{ font-size:13px; }}
+    .interval-track {{ height:8px; background:var(--soft); border-radius:999px; overflow:hidden; }}
     .interval-fill {{ display:flex; height:100%; min-width:0; border-radius:inherit; overflow:hidden; }}
     .consumption-segment {{ height:100%; background:var(--primary); }}
     .recharge-segment {{ height:100%; background:#16875b; }}
     .interval-counts {{ display:flex; align-items:center; justify-content:flex-end; gap:9px;
-      color:var(--muted); font-size:11px; white-space:nowrap; }}
-    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:15px; }}
+      color:var(--muted); font-size:12px; white-space:nowrap; }}
+    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:16px; }}
     .back-to-top {{ position:fixed; right:18px; bottom:18px; z-index:5; box-shadow:0 4px 16px #17223b18;
       opacity:0; pointer-events:none; transform:translateY(8px); transition:opacity .18s ease,transform .18s ease; }}
     .back-to-top.visible {{ opacity:1; pointer-events:auto; transform:translateY(0); }}

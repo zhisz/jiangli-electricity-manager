@@ -669,9 +669,16 @@ class PublicHistoryStore:
                 """,
                 (slot_time,),
             ).fetchall() if slot_time else []
-            total_samples = int(connection.execute(
-                "SELECT COUNT(*) FROM samples"
-            ).fetchone()[0])
+            retained_summary = connection.execute(
+                """
+                SELECT COUNT(*) AS total_samples,
+                       SUM(CASE WHEN query_result != 'success' THEN 1 ELSE 0 END)
+                           AS total_failures
+                FROM samples
+                """
+            ).fetchone()
+            total_samples = int(retained_summary["total_samples"] or 0)
+            total_failures = int(retained_summary["total_failures"] or 0)
 
         building_list = [dict(row) for row in building_rows]
         valid_rooms = sum(int(row["room_count"] or 0) for row in building_list)
@@ -696,6 +703,7 @@ class PublicHistoryStore:
             "no_meter_count": no_meter,
             "current_building": current_building,
             "total_samples": total_samples,
+            "total_failure_samples": total_failures,
             "failures": [dict(row) for row in failures],
             "current_round": collection_round_number(slot_time),
             "round_total": COLLECTION_ROUND_TOTAL,
