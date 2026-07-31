@@ -104,8 +104,11 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertEqual("1楼", event["floor_name"])
         self.assertEqual("101", event["room_name"])
         self.assertEqual(self.room.room_code, event["room_code"])
-        self.assertEqual(8, overview["distribution"][0]["start_hour"])
-        self.assertEqual(9, overview["distribution"][0]["end_hour"])
+        morning_interval = next(
+            row for row in overview["distribution"] if row["end_hour"] == 9
+        )
+        self.assertEqual(8, morning_interval["start_hour"])
+        self.assertEqual(9, morning_interval["end_hour"])
 
         # 充值金额与消耗金额属于相反方向，后台必须分别筛选后再排序，不能按绝对值混排。
         recharge_events = self.store.collector_overview(
@@ -316,6 +319,31 @@ class CollectorEventQueryTests(unittest.TestCase):
             row["current_query_time"][11:13] == "09" for row in interval["events"]
         ))
 
+    def test_midnight_interval_uses_24_as_nonzero_filter_token(self):
+        with self.store._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO change_events(
+                    id, room_code, building_code, building_name,
+                    previous_sample_id, current_sample_id,
+                    previous_query_time, current_query_time,
+                    before_balance, after_balance, delta_balance, inferred_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    3_000, "001001001001001", "001001001", "第一公寓",
+                    6_000, 6_001,
+                    "2026-07-30T23:03:00+08:00",
+                    "2026-07-31T00:03:00+08:00",
+                    50.0, 49.0, -1.0, "用电消耗",
+                ),
+            )
+        midnight = self.store.collector_events(
+            day="2026-07-31", interval_end_hour=24
+        )
+        self.assertEqual(1, midnight["total"])
+        self.assertEqual("00", midnight["events"][0]["current_query_time"][11:13])
+
     def test_amount_sorting_strictly_forces_matching_event_type(self):
         recharge = self.store.collector_events(
             day="2026-07-31", event_type="用电消耗",
@@ -332,14 +360,14 @@ class CollectorEventQueryTests(unittest.TestCase):
             row["inferred_type"] == "用电消耗" for row in consumption["events"]
         ))
 
-    def test_distribution_has_twelve_adjacent_intervals_and_summary(self):
+    def test_distribution_has_twenty_four_hourly_intervals_and_summary(self):
         result = self.store.collector_distribution("2026-07-31")
-        self.assertEqual(12, len(result["intervals"]))
-        self.assertEqual((8, 9), (
+        self.assertEqual(24, len(result["intervals"]))
+        self.assertEqual((23, 24), (
             result["intervals"][0]["start_hour"],
             result["intervals"][0]["end_hour"],
         ))
-        self.assertEqual((19, 20), (
+        self.assertEqual((22, 23), (
             result["intervals"][-1]["start_hour"],
             result["intervals"][-1]["end_hour"],
         ))
@@ -376,17 +404,27 @@ class DirectoryScopeTests(unittest.TestCase):
         self.assertEqual("充值", history.infer_change_type(1_000))
         self.assertEqual("待确认", history.infer_change_type(-100))
 
-    def test_collection_round_maps_08_to_20_into_thirteen_rounds(self):
+    def test_collection_round_maps_full_day_into_twenty_four_rounds(self):
         self.assertEqual(
-            1, history.collection_round_number("2026-07-31T08:00:00+08:00")
+            1, history.collection_round_number("2026-07-31T00:00:00+08:00")
         )
         self.assertEqual(
-            13, history.collection_round_number("2026-07-31T20:00:00+08:00")
-        )
-        self.assertEqual(
-            0, history.collection_round_number("2026-07-31T21:00:00+08:00")
+            24, history.collection_round_number("2026-07-31T23:00:00+08:00")
         )
         self.assertEqual(0, history.collection_round_number("not-a-time"))
+
+    def test_every_hour_is_inside_dispatch_window(self):
+        for hour in range(24):
+            self.assertTrue(history.is_collection_dispatch_time(
+                dt.datetime(
+                    2026, 7, 31, hour, 0, tzinfo=history.SHANGHAI
+                )
+            ))
+        self.assertFalse(history.is_collection_dispatch_time(
+            dt.datetime(
+                2026, 7, 31, 23, 10, tzinfo=history.SHANGHAI
+            )
+        ))
 
     def test_negative_balance_is_valid_arrears(self):
         client = object.__new__(history.XiaofubaoClient)

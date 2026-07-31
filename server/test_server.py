@@ -36,6 +36,7 @@ class CollectorAdminParameterTests(unittest.TestCase):
             "/admin/collector/events?date=2026-07-31&buildingCode=001001001"
             "&roomCode=001001001003305&eventType=%E5%85%85%E5%80%BC"
             "&sort=recharge_amount_desc&pageSize=500&page=3&snapshot=1200"
+            "&intervalEnd=24"
         )
         self.assertEqual("2026-07-31", parameters["day"])
         self.assertEqual("001001001", parameters["building_code"])
@@ -44,12 +45,13 @@ class CollectorAdminParameterTests(unittest.TestCase):
         self.assertEqual(500, parameters["events"]["page_size"])
         self.assertEqual(3, parameters["events"]["page"])
         self.assertEqual(1200, parameters["events"]["snapshot_id"])
+        self.assertEqual(24, parameters["interval_end_hour"])
 
     def test_invalid_sort_page_size_and_codes_fall_back_safely(self):
         parameters = app_server._collector_parameters(
             "/admin/collector/events?buildingCode=1%20OR%201%3D1"
             "&roomCode=not-a-room&sort=current_query_time%20DROP%20TABLE"
-            "&pageSize=99999&intervalEnd=7"
+            "&pageSize=99999&intervalEnd=25"
         )
         self.assertEqual("", parameters["building_code"])
         self.assertEqual("", parameters["room_code"])
@@ -73,8 +75,8 @@ class CollectorAdminParameterTests(unittest.TestCase):
     def test_distribution_keeps_only_counts_and_event_categories(self):
         intervals = [
             {
-                "start_hour": hour,
-                "end_hour": hour + 1,
+                "start_hour": (end_hour - 1) % 24,
+                "end_hour": 24 if end_hour == 0 else end_hour,
                 "total_count": 600 if hour == 17 else 0,
                 "recharge_count": 0,
                 "consumption_count": 600 if hour == 17 else 0,
@@ -82,7 +84,8 @@ class CollectorAdminParameterTests(unittest.TestCase):
                 "total_delta_kwh": -123.4,
                 "total_delta_amount": -74.04,
             }
-            for hour in range(8, 20)
+            for end_hour in range(24)
+            for hour in [(end_hour - 1) % 24]
         ]
         fragment = app_server.collector_distribution_fragment(
             {
@@ -92,6 +95,7 @@ class CollectorAdminParameterTests(unittest.TestCase):
             }
         )
         self.assertIn("17:00–18:00", fragment)
+        self.assertIn("23:00–00:00", fragment)
         self.assertIn("消耗 600", fragment)
         self.assertIn("充值 0", fragment)
         self.assertNotIn("-123.4", fragment)

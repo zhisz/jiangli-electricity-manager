@@ -1352,8 +1352,10 @@ def _collector_parameters(path_with_query: str) -> dict[str, Any]:
     page_size = _bounded_int(query.get("pageSize", ["100"])[0], 100, 1, 1_000_000)
     if page_size not in EVENT_PAGE_SIZES:
         page_size = 100
-    interval_end = _bounded_int(query.get("intervalEnd", ["0"])[0], 0, 0, 20)
-    if interval_end not in range(9, 21):
+    interval_end = _bounded_int(
+        query.get("intervalEnd", ["0"])[0], 0, 0, 1_000_000
+    )
+    if interval_end not in range(1, 25):
         interval_end = 0
     page = _bounded_int(query.get("page", ["1"])[0], 1, 1, 1_000_000)
     snapshot_id = _bounded_int(
@@ -1656,7 +1658,7 @@ def _distribution_interval_html(
     return f"""
       <button class="interval-card{selected}{abnormal}" type="button"
         data-interval-end="{int(row["end_hour"])}">
-        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]):02d}:00</strong>
+        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]) % 24:02d}:00</strong>
         <div class="interval-visual"><div class="interval-track"><div class="interval-fill" style="width:{width:.2f}%">
           <span class="consumption-segment" style="width:{consumption_share:.2f}%"></span>
           <span class="recharge-segment" style="width:{recharge_share:.2f}%"></span>

@@ -49,8 +49,8 @@ ROOM_CODE_PATTERN = r"\d{15}"
 RETENTION_DAYS = 30
 DATA_VERSION = 2
 LARGE_NEGATIVE_CHANGE_KWH = 100.0
-COLLECTION_START_HOUR = 8
-COLLECTION_END_HOUR = 20
+COLLECTION_START_HOUR = 0
+COLLECTION_END_HOUR = 23
 COLLECTION_ROUND_TOTAL = COLLECTION_END_HOUR - COLLECTION_START_HOUR + 1
 
 # 后台排序参数只能映射到这里的固定 SQL，绝不直接拼接用户输入。
@@ -757,9 +757,11 @@ class PublicHistoryStore:
         if event_type in EVENT_TYPES:
             conditions.append("ce.inferred_type = ?")
             values.append(event_type)
-        if 9 <= interval_end_hour <= 20:
+        # interval_end_hour=24 代表跨日区间 23:00–00:00；0 继续保留为
+        # “未选择时段”，避免破坏现有后台查询参数。
+        if 1 <= interval_end_hour <= 24:
             conditions.append("substr(ce.current_query_time, 12, 2) = ?")
-            values.append(f"{interval_end_hour:02d}")
+            values.append(f"{interval_end_hour % 24:02d}")
         if snapshot_id > 0:
             conditions.append("ce.id <= ?")
             values.append(snapshot_id)
@@ -847,7 +849,7 @@ class PublicHistoryStore:
         building_code: str = "",
         room_code: str = "",
     ) -> dict[str, Any]:
-        """按后一次采集小时聚合 08:00～20:00 的相邻轮次变化。"""
+        """按后一次采集小时聚合全天24轮对应的24个变化区间。"""
 
         resolved_day = self.resolve_analysis_day(day)
         where, values = self._event_filters(
@@ -890,12 +892,15 @@ class PublicHistoryStore:
             ).fetchall()
         lookup = {int(row["end_hour"]): dict(row) for row in rows}
         intervals = []
-        for start_hour in range(COLLECTION_START_HOUR, COLLECTION_END_HOUR):
-            end_hour = start_hour + 1
-            row = lookup.get(end_hour, {})
+        # 事件归属后一次查询所在的自然日，因此当天第一个区间是前一日
+        # 23:00 到当天 00:00；随后依次排列到 22:00–23:00。
+        for actual_end_hour in range(24):
+            start_hour = (actual_end_hour - 1) % 24
+            display_end_hour = 24 if actual_end_hour == 0 else actual_end_hour
+            row = lookup.get(actual_end_hour, {})
             intervals.append({
                 "start_hour": start_hour,
-                "end_hour": end_hour,
+                "end_hour": display_end_hour,
                 "total_count": int(row.get("total_count") or 0),
                 "recharge_count": int(row.get("recharge_count") or 0),
                 "consumption_count": int(row.get("consumption_count") or 0),
@@ -947,7 +952,7 @@ def infer_change_type(delta: float) -> str:
 
 
 def collection_round_number(slot_time: str) -> int:
-    """把 08:00～20:00 的任务时刻映射为第 1～13 轮，异常数据安全返回 0。"""
+    """把 00:00～23:00 的任务时刻映射为第1～24轮，异常数据安全返回0。"""
 
     if not slot_time:
         return 0
@@ -958,6 +963,12 @@ def collection_round_number(slot_time: str) -> int:
     if hour < COLLECTION_START_HOUR or hour > COLLECTION_END_HOUR:
         return 0
     return hour - COLLECTION_START_HOUR + 1
+
+
+def is_collection_dispatch_time(now: dt.datetime) -> bool:
+    """全天每小时的前10分钟允许调度，供重启后的当前整点补跑。"""
+
+    return COLLECTION_START_HOUR <= now.hour <= COLLECTION_END_HOUR and now.minute < 10
 
 
 class XiaofubaoClient:
@@ -1251,7 +1262,7 @@ class PublicHistoryCollector:
 
 
 class CollectorScheduler:
-    """北京时间 08:00–20:00 整点调度；重启后十分钟内可补跑当前轮次。"""
+    """北京时间全天整点调度；重启后十分钟内可补跑当前轮次。"""
 
     def __init__(self, collector: PublicHistoryCollector) -> None:
         self.collector = collector
@@ -1275,7 +1286,7 @@ class CollectorScheduler:
     def _loop(self) -> None:
         while not self._stop.wait(15):
             now = shanghai_now()
-            if not (8 <= now.hour <= 20 and now.minute < 10):
+            if not is_collection_dispatch_time(now):
                 continue
             slot = now.replace(minute=0, second=0, microsecond=0)
             slot_key = iso_shanghai(slot)
