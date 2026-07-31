@@ -30,6 +30,47 @@ class PasswordTests(unittest.TestCase):
         self.assertTrue(limiter.allow("other-client"))
 
 
+class CollectorAdminParameterTests(unittest.TestCase):
+    def test_event_query_parameters_are_whitelisted(self):
+        parameters = app_server._collector_parameters(
+            "/admin/collector/events?date=2026-07-31&buildingCode=001001001"
+            "&roomCode=001001001003305&eventType=%E5%85%85%E5%80%BC"
+            "&sort=recharge_amount_desc&pageSize=500&page=3&snapshot=1200"
+        )
+        self.assertEqual("2026-07-31", parameters["day"])
+        self.assertEqual("001001001", parameters["building_code"])
+        self.assertEqual("001001001003305", parameters["room_code"])
+        self.assertEqual("充值", parameters["event_type"])
+        self.assertEqual(500, parameters["events"]["page_size"])
+        self.assertEqual(3, parameters["events"]["page"])
+        self.assertEqual(1200, parameters["events"]["snapshot_id"])
+
+    def test_invalid_sort_page_size_and_codes_fall_back_safely(self):
+        parameters = app_server._collector_parameters(
+            "/admin/collector/events?buildingCode=1%20OR%201%3D1"
+            "&roomCode=not-a-room&sort=current_query_time%20DROP%20TABLE"
+            "&pageSize=99999&intervalEnd=7"
+        )
+        self.assertEqual("", parameters["building_code"])
+        self.assertEqual("", parameters["room_code"])
+        self.assertEqual("time_desc", parameters["events"]["event_sort"])
+        self.assertEqual(100, parameters["events"]["page_size"])
+        self.assertEqual(0, parameters["interval_end_hour"])
+
+    def test_inline_admin_script_gets_exact_csp_hash(self):
+        handler = object.__new__(app_server.Handler)
+        captured = {}
+
+        def capture(status, body, content_type, **kwargs):
+            captured.update(kwargs)
+
+        handler._send_bytes = capture
+        handler._send_html(app_server.HTTPStatus.OK, "<script>safe()</script>")
+        hashes = captured["script_hashes"]
+        self.assertEqual(1, len(hashes))
+        self.assertTrue(hashes[0].startswith("'sha256-"))
+
+
 class AnalyticsStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()

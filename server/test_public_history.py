@@ -104,8 +104,8 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertEqual("1楼", event["floor_name"])
         self.assertEqual("101", event["room_name"])
         self.assertEqual(self.room.room_code, event["room_code"])
-        self.assertEqual("08", overview["distribution"][0]["start_hour"])
-        self.assertEqual("09", overview["distribution"][0]["end_hour"])
+        self.assertEqual(8, overview["distribution"][0]["start_hour"])
+        self.assertEqual(9, overview["distribution"][0]["end_hour"])
 
         # 充值金额与消耗金额属于相反方向，后台必须分别筛选后再排序，不能按绝对值混排。
         recharge_events = self.store.collector_overview(
@@ -209,6 +209,151 @@ class FakeDirectoryClient:
             # 跨楼栋脏数据必须丢弃。
             {"code": "001001999001001", "name": "错误房间"},
         ]
+
+
+class CollectorEventQueryTests(unittest.TestCase):
+    """后台事件查询回归：覆盖大数据分页、筛选、快照和稳定次级排序。"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.database = Path(self.temp_dir.name) / "collector.sqlite3"
+        self.store = history.PublicHistoryStore(self.database)
+        self._insert_events(1_250)
+
+    def _insert_events(self, count, *, first_id=1):
+        rows = []
+        for offset in range(count):
+            event_id = first_id + offset
+            building_index = event_id % 2
+            building_code = f"00100100{building_index + 1}"
+            room_code = f"{building_code}001{event_id % 999:03d}"
+            end_hour = 9 + event_id % 12
+            event_type = "充值" if event_id % 3 == 0 else "用电消耗"
+            delta = 10.0 if event_type == "充值" else -1.0
+            rows.append((
+                event_id, room_code, building_code,
+                "第一公寓" if building_index == 0 else "第二公寓",
+                event_id * 2, event_id * 2 + 1,
+                f"2026-07-31T{end_hour - 1:02d}:02:00+08:00",
+                f"2026-07-31T{end_hour:02d}:03:00+08:00",
+                50.0, 50.0 + delta, delta, event_type,
+            ))
+        with self.store._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO change_events(
+                    id, room_code, building_code, building_name,
+                    previous_sample_id, current_sample_id,
+                    previous_query_time, current_query_time,
+                    before_balance, after_balance, delta_balance, inferred_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    def test_more_than_200_events_are_available_through_stable_pages(self):
+        pages = []
+        first = self.store.collector_events(
+            day="2026-07-31", page=1, page_size=500
+        )
+        self.assertEqual(1_250, first["total"])
+        self.assertEqual(3, first["total_pages"])
+        self.assertEqual(500, len(first["events"]))
+        pages.extend(first["events"])
+        for page_number in (2, 3):
+            page = self.store.collector_events(
+                day="2026-07-31", page=page_number, page_size=500,
+                snapshot_id=first["snapshot_id"],
+            )
+            pages.extend(page["events"])
+        ids = [row["id"] for row in pages]
+        self.assertEqual(1_250, len(ids))
+        self.assertEqual(1_250, len(set(ids)))
+        with self.store._connect() as connection:
+            expected = [row[0] for row in connection.execute(
+                """
+                SELECT id FROM change_events
+                ORDER BY current_query_time DESC, id DESC
+                """
+            )]
+        self.assertEqual(expected, ids)
+
+    def test_snapshot_prevents_new_insert_from_shifting_later_pages(self):
+        first = self.store.collector_events(
+            day="2026-07-31", page=1, page_size=100
+        )
+        first_ids = {row["id"] for row in first["events"]}
+        self._insert_events(1, first_id=2_000)
+        second = self.store.collector_events(
+            day="2026-07-31", page=2, page_size=100,
+            snapshot_id=first["snapshot_id"],
+        )
+        self.assertEqual(1_250, second["total"])
+        self.assertTrue(first_ids.isdisjoint({row["id"] for row in second["events"]}))
+        self.assertNotIn(2_000, {row["id"] for row in second["events"]})
+
+    def test_date_building_room_type_and_interval_filters_run_in_database(self):
+        sample = self.store.collector_events(
+            day="2026-07-31", page_size=100
+        )["events"][0]
+        building = self.store.collector_events(
+            day="2026-07-31", building_code=sample["building_code"]
+        )
+        room = self.store.collector_events(
+            day="2026-07-31", room_code=sample["room_code"]
+        )
+        recharge = self.store.collector_events(
+            day="2026-07-31", event_type="充值"
+        )
+        interval = self.store.collector_events(
+            day="2026-07-31", interval_end_hour=9
+        )
+        self.assertTrue(building["total"] < 1_250)
+        self.assertEqual(1, room["total"])
+        self.assertTrue(all(row["inferred_type"] == "充值" for row in recharge["events"]))
+        self.assertTrue(all(
+            row["current_query_time"][11:13] == "09" for row in interval["events"]
+        ))
+
+    def test_amount_sorting_strictly_forces_matching_event_type(self):
+        recharge = self.store.collector_events(
+            day="2026-07-31", event_type="用电消耗",
+            event_sort="recharge_amount_desc",
+        )
+        consumption = self.store.collector_events(
+            day="2026-07-31", event_type="充值",
+            event_sort="consumption_amount_desc",
+        )
+        self.assertEqual("充值", recharge["event_type"])
+        self.assertEqual("用电消耗", consumption["event_type"])
+        self.assertTrue(all(row["inferred_type"] == "充值" for row in recharge["events"]))
+        self.assertTrue(all(
+            row["inferred_type"] == "用电消耗" for row in consumption["events"]
+        ))
+
+    def test_distribution_has_twelve_adjacent_intervals_and_summary(self):
+        result = self.store.collector_distribution("2026-07-31")
+        self.assertEqual(12, len(result["intervals"]))
+        self.assertEqual((8, 9), (
+            result["intervals"][0]["start_hour"],
+            result["intervals"][0]["end_hour"],
+        ))
+        self.assertEqual((19, 20), (
+            result["intervals"][-1]["start_hour"],
+            result["intervals"][-1]["end_hour"],
+        ))
+        self.assertEqual(1_250, result["total"])
+
+    def test_required_event_indexes_exist(self):
+        with self.store._connect() as connection:
+            indexes = {
+                row[1] for row in connection.execute("PRAGMA index_list(change_events)")
+            }
+        self.assertTrue({
+            "idx_events_time_id", "idx_events_room_time_id",
+            "idx_events_type_time_id", "idx_events_building_time",
+        }.issubset(indexes))
 
 
 class DirectoryScopeTests(unittest.TestCase):
