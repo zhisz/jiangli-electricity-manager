@@ -75,4 +75,13 @@ public final class CloudHistoryClientTest {
         );
         assertEquals(0, imported);
     }
+
+    @Test
+    public void negativeBalanceIsValidArrearsInsteadOfCloudFailure() {
+        CloudHistoryRecord arrears = new CloudHistoryRecord(
+                "arrears-key", ROOM, 1_785_427_200_000L,
+                -0.5, -0.31, "success"
+        );
+        assertEquals(true, arrears.isValidSuccess());
+    }
 }

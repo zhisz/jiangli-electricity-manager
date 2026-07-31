@@ -176,6 +176,24 @@ class DirectoryScopeTests(unittest.TestCase):
         self.assertEqual("疑似充值或平台修正", history.infer_change_type(20))
         self.assertEqual("待确认", history.infer_change_type(100))
 
+    def test_negative_balance_is_valid_arrears(self):
+        client = object.__new__(history.XiaofubaoClient)
+        client._request = lambda _endpoint, _fields: {
+            "data": {"surplus": -0.5, "amount": -0.31}
+        }
+        result = client.query_balance(
+            history.RoomEntry(
+                "001001001001008",
+                "001001001",
+                "第一公寓",
+                "001001001001",
+                "1楼",
+                "108",
+            )
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(-0.5, result.balance_kwh)
+
 
 if __name__ == "__main__":
     unittest.main()

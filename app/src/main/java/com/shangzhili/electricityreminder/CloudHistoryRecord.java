@@ -33,8 +33,6 @@ public final class CloudHistoryRecord {
                 && queriedAt > 0
                 && Double.isFinite(surplus)
                 && Double.isFinite(amount)
-                && surplus >= 0
-                && amount >= 0
                 && "success".equals(queryResult);
     }
 }

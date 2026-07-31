@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import socket
 import sqlite3
 import threading
@@ -704,7 +705,9 @@ class XiaofubaoClient:
                 raise RemoteError("invalid_response")
             surplus = float(data["surplus"])
             amount = float(data["amount"])
-            if surplus < 0 or amount < 0:
+            # 校付宝会用负数表示已经欠费，Android 实时查询也一直允许负余额。
+            # 这里只拒绝 NaN/Infinity，不能把真实欠费房间误标成接口异常。
+            if not math.isfinite(surplus) or not math.isfinite(amount):
                 raise RemoteError("invalid_response")
             return QueryResult(True, surplus, amount)
         except RemoteError as exception:
