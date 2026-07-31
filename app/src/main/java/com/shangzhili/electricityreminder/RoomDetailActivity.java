@@ -58,7 +58,6 @@ public final class RoomDetailActivity extends Activity {
     private int appliedThemeState;
     private RoomRepository repository;
     private ReadingHistoryStore historyStore;
-    private final ElectricityDirectoryClient directoryClient = new ElectricityDirectoryClient();
     private MonitorState monitorState;
     private String roomId;
     private boolean savedRoom;
@@ -81,7 +80,6 @@ public final class RoomDetailActivity extends Activity {
     private HorizontalScrollView balanceTrendScrollView;
     private HorizontalScrollView dailyUsageScrollView;
     private EditText aliasInput;
-    private EditText roomCodeInput;
     private EditText thresholdInput;
     private EditText recoveryInput;
     private EditText repeatMinutesInput;
@@ -90,18 +88,12 @@ public final class RoomDetailActivity extends Activity {
     private Button saveButton;
     private Button cancelMonitoringButton;
     private Button deleteButton;
-    private Button selectRoomButton;
-    private Button manualCodeToggleButton;
     private Button rechargeRecordsButton;
     private Button onlineRechargeButton;
     private Button saveAliasButton;
-    private Button roomInfoHeaderButton;
     private Button reminderSettingsHeaderButton;
-    private TextView selectedRoomText;
-    private LinearLayout manualCodeContainer;
     private LinearLayout balanceTrendContainer;
     private LinearLayout dailyUsageContainer;
-    private LinearLayout roomInfoContent;
     private LinearLayout reminderSettingsContent;
     private LinearLayout quickActionsContainer;
     private List<HistoryPoint> latestHistoryPoints = new ArrayList<>();
@@ -172,6 +164,11 @@ public final class RoomDetailActivity extends Activity {
         refreshStatus();
         refreshHistory();
         refreshMonitorStatus(repository.load(roomId));
+        if (savedRoom && repository.isConfigured(roomId)) {
+            // 先完成本地页面渲染，再异步补充最近 30 天公共采样。服务器故障不会进入
+            // 当前页面的错误状态，也不会推迟下面的实时余额查询。
+            syncCloudHistoryInBackground(repository.load(roomId));
+        }
 
         findViewById(R.id.backButton).setOnClickListener(view -> finish());
         queryButton.setOnClickListener(view -> queryNow(false));
@@ -182,12 +179,7 @@ public final class RoomDetailActivity extends Activity {
                 startActivity(RechargeRecordsActivity.createIntent(this, roomId))
         );
         onlineRechargeButton.setOnClickListener(view -> startOnlineRecharge());
-        selectRoomButton.setOnClickListener(view -> loadBuildings());
-        manualCodeToggleButton.setOnClickListener(view -> toggleManualCodeInput());
         saveAliasButton.setOnClickListener(view -> saveAliasOnly());
-        roomInfoHeaderButton.setOnClickListener(view -> toggleSettingsSection(
-                roomInfoContent, roomInfoHeaderButton, "房间信息"
-        ));
         reminderSettingsHeaderButton.setOnClickListener(view -> toggleSettingsSection(
                 reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置"
         ));
@@ -271,7 +263,6 @@ public final class RoomDetailActivity extends Activity {
         balanceTrendContainer = findViewById(R.id.balanceTrendContainer);
         dailyUsageContainer = findViewById(R.id.dailyUsageContainer);
         aliasInput = findViewById(R.id.aliasInput);
-        roomCodeInput = findViewById(R.id.roomCodeInput);
         thresholdInput = findViewById(R.id.thresholdInput);
         recoveryInput = findViewById(R.id.recoveryInput);
         repeatMinutesInput = findViewById(R.id.repeatMinutesInput);
@@ -280,35 +271,25 @@ public final class RoomDetailActivity extends Activity {
         saveButton = findViewById(R.id.saveButton);
         cancelMonitoringButton = findViewById(R.id.cancelMonitoringButton);
         deleteButton = findViewById(R.id.deleteButton);
-        selectRoomButton = findViewById(R.id.selectRoomButton);
-        manualCodeToggleButton = findViewById(R.id.manualCodeToggleButton);
         rechargeRecordsButton = findViewById(R.id.openRechargeRecordsButton);
         onlineRechargeButton = findViewById(R.id.openOnlineRechargeButton);
         saveAliasButton = findViewById(R.id.saveAliasButton);
-        roomInfoHeaderButton = findViewById(R.id.roomInfoHeaderButton);
         reminderSettingsHeaderButton = findViewById(R.id.reminderSettingsHeaderButton);
-        roomInfoContent = findViewById(R.id.roomInfoContent);
         reminderSettingsContent = findViewById(R.id.reminderSettingsContent);
         quickActionsContainer = findViewById(R.id.quickActionsContainer);
-        selectedRoomText = findViewById(R.id.selectedRoomText);
-        manualCodeContainer = findViewById(R.id.manualCodeContainer);
         updateMonitoringButtons();
     }
 
     private void populate(AppConfig config) {
         detailTitle.setText(savedRoom ? config.alias : "添加房间");
         aliasInput.setText(config.alias);
-        roomCodeInput.setText(config.roomCode);
-        selectedRoomText.setText(config.roomCode == null || config.roomCode.isEmpty()
-                ? "尚未选择房间" : "已保存房间，可点击上方按钮重新选择");
         amountRadio.setChecked("amount".equals(config.metric));
         ((RadioButton) findViewById(R.id.surplusRadio)).setChecked("surplus".equals(config.metric));
         thresholdInput.setText(number(config.threshold));
         recoveryInput.setText(number(config.recoveryThreshold));
         repeatMinutesInput.setText(number(config.repeatMinutes));
         saveAliasButton.setEnabled(savedRoom);
-        // 新房间必须先填写信息和规则，因此默认展开；已保存房间保持数据优先的折叠状态。
-        setSettingsSection(roomInfoContent, roomInfoHeaderButton, "房间信息", !savedRoom);
+        // 添加流程已在首页完成房间选择，详情页只让用户维护备注和提醒规则。
         setSettingsSection(reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", !savedRoom);
         if (savedRoom) updateScheduleText(config);
     }
@@ -1097,6 +1078,10 @@ public final class RoomDetailActivity extends Activity {
                 .show();
     }
 
+    private String safeMessage(Exception exception) {
+        return exception.getMessage() == null ? "未知错误" : exception.getMessage();
+    }
+
     private void setRechargeBusy(boolean busy, String busyLabel) {
         rechargeBusy = busy;
         if (onlineRechargeButton == null) return;
@@ -1106,141 +1091,6 @@ public final class RoomDetailActivity extends Activity {
                         ? (busyLabel == null ? "正在处理…" : busyLabel)
                         : getString(R.string.online_recharge_button)
         );
-    }
-
-    /**
-     * 第一级先读取校区全部楼栋。网络请求始终放在单线程 executor 中，避免阻塞主线程；
-     * 对话框和文本更新再切回 UI 线程执行。
-     */
-    private void loadBuildings() {
-        setRoomPickerBusy("正在加载楼栋……");
-        executor.execute(() -> {
-            try {
-                List<DirectoryOption> buildings = directoryClient.queryBuildings();
-                runOnUiThread(() -> showOptionDialog(
-                        "选择楼栋", buildings,
-                        building -> loadFloors(building)
-                ));
-            } catch (Exception exception) {
-                showDirectoryFailure(exception);
-            }
-        });
-    }
-
-    /** 选择楼栋后，使用其 buildingCode 加载对应楼层。 */
-    private void loadFloors(DirectoryOption building) {
-        setRoomPickerBusy("正在加载“" + building.name + "”的楼层……");
-        executor.execute(() -> {
-            try {
-                List<DirectoryOption> floors = directoryClient.queryFloors(building.code);
-                runOnUiThread(() -> showOptionDialog(
-                        "选择楼层", floors,
-                        floor -> loadRooms(building, floor)
-                ));
-            } catch (Exception exception) {
-                showDirectoryFailure(exception);
-            }
-        });
-    }
-
-    /** 选择楼层后读取房间；最终 roomCode 由房间接口直接返回，不在客户端猜测或拼接。 */
-    private void loadRooms(DirectoryOption building, DirectoryOption floor) {
-        setRoomPickerBusy("正在加载“" + floor.name + "”的房间……");
-        executor.execute(() -> {
-            try {
-                List<DirectoryOption> rooms = directoryClient.queryRooms(
-                        building.code, floor.code
-                );
-                runOnUiThread(() -> showOptionDialog(
-                        "选择房间", rooms,
-                        room -> applySelectedRoom(building, floor, room)
-                ));
-            } catch (Exception exception) {
-                showDirectoryFailure(exception);
-            }
-        });
-    }
-
-    /**
-     * 使用单选列表展示一级目录。取消任意一级都会恢复按钮，不会修改此前保存的房间码。
-     */
-    private void showOptionDialog(
-            String title,
-            List<DirectoryOption> options,
-            OptionSelectedListener listener
-    ) {
-        if (isFinishing() || isDestroyed()) return;
-        String[] names = new String[options.size()];
-        for (int index = 0; index < options.size(); index++) {
-            names[index] = options.get(index).name;
-        }
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setItems(names, (ignored, index) -> listener.onSelected(options.get(index)))
-                .setNegativeButton("取消", (ignored, which) -> setRoomPickerIdle())
-                .create();
-        dialog.setOnCancelListener(ignored -> setRoomPickerIdle());
-        dialog.show();
-    }
-
-    private void applySelectedRoom(
-            DirectoryOption building,
-            DirectoryOption floor,
-            DirectoryOption room
-    ) {
-        roomCodeInput.setText(room.code);
-        selectedRoomText.setText(
-                "已选择：" + building.name + " · " + floor.name + " · " + room.name
-        );
-        selectedRoomText.setTextColor(getColor(R.color.status_normal));
-        // 新房间仍是默认别名时，直接用接口返回的可读房间名，用户之后可以自由修改。
-        String currentAlias = text(aliasInput);
-        if (currentAlias.isEmpty() || "新房间".equals(currentAlias)
-                || "未命名房间".equals(currentAlias)) {
-            aliasInput.setText(room.name);
-        }
-        setRoomPickerIdle();
-    }
-
-    private void showDirectoryFailure(Exception exception) {
-        runOnUiThread(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            String message = exception instanceof AuthExpiredException
-                    ? "内置登录态已失效，暂时无法加载房间目录"
-                    : "房间目录加载失败：" + safeMessage(exception);
-            selectedRoomText.setText(message + "；可重试或使用下方手动输入");
-            selectedRoomText.setTextColor(getColor(R.color.status_danger));
-            setRoomPickerIdle();
-        });
-    }
-
-    private String safeMessage(Exception exception) {
-        return exception.getMessage() == null ? "未知错误" : exception.getMessage();
-    }
-
-    private void setRoomPickerBusy(String message) {
-        runOnUiThread(() -> {
-            selectRoomButton.setEnabled(false);
-            selectRoomButton.setText("正在加载……");
-            selectedRoomText.setText(message);
-            selectedRoomText.setTextColor(getColor(R.color.text_secondary));
-        });
-    }
-
-    private void setRoomPickerIdle() {
-        selectRoomButton.setEnabled(true);
-        selectRoomButton.setText("选择楼栋、楼层和房间");
-    }
-
-    private void toggleManualCodeInput() {
-        boolean showing = manualCodeContainer.getVisibility() == View.VISIBLE;
-        manualCodeContainer.setVisibility(showing ? View.GONE : View.VISIBLE);
-        manualCodeToggleButton.setText(showing
-                ? "高级：手动填写房间码" : "收起手动房间码");
-    }
-
-    private interface OptionSelectedListener {
-        void onSelected(DirectoryOption option);
     }
 
     /** 折叠只改变可见性，不重新 inflate 或清空输入框，所以用户尚未保存的内容会完整保留。 */
@@ -1280,8 +1130,11 @@ public final class RoomDetailActivity extends Activity {
         thresholdInput.setError(null);
         recoveryInput.setError(null);
         repeatMinutesInput.setError(null);
-        roomCodeInput.setError(null);
         try {
+            if (!savedRoom || !repository.contains(roomId)) {
+                throw new IllegalArgumentException("请从首页重新添加房间");
+            }
+            AppConfig savedConfig = repository.load(roomId);
             double threshold = parseNumber(thresholdInput, "请输入提醒阈值");
             double recovery = parseNumber(recoveryInput, "请输入恢复阈值");
             double repeatMinutes = parseNumber(repeatMinutesInput, "请输入复查间隔");
@@ -1300,7 +1153,9 @@ public final class RoomDetailActivity extends Activity {
                     : Collections.singletonList(new DailyCheckTime(9, 0));
             AppConfig config = new AppConfig(
                     text(aliasInput),
-                    text(roomCodeInput),
+                    // 房间码只在首页添加窗口确定。详情页不再提供修改入口，防止用户
+                    // 误改代码后让已有历史、充值记录和监测规则指向另一个房间。
+                    savedConfig.roomCode,
                     amountRadio.isChecked() ? "amount" : "surplus",
                     threshold,
                     recovery,
@@ -1315,14 +1170,9 @@ public final class RoomDetailActivity extends Activity {
             );
             throw new IllegalArgumentException("阈值和重复间隔必须填写数字");
         } catch (IllegalArgumentException exception) {
-            if (exception.getMessage() != null && exception.getMessage().contains("房间代码")) {
-                roomCodeInput.setError("请选择房间，或填写 15 位房间码");
-                setSettingsSection(roomInfoContent, roomInfoHeaderButton, "房间信息", true);
-            } else {
-                setSettingsSection(
-                        reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", true
-                );
-            }
+            setSettingsSection(
+                    reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", true
+            );
             throw exception;
         }
     }
@@ -1412,6 +1262,9 @@ public final class RoomDetailActivity extends Activity {
                     refreshHistory();
                     setBusy(false);
                 });
+                // 实时查询已经成功展示和写入本地后才启动补充同步。两条网络链路互不
+                // 等待，云端超时不会改变本次查询的成功结果。
+                syncCloudHistoryInBackground(config);
             } catch (AuthExpiredException exception) {
                 monitorState.recordFailure(exception.getMessage());
                 runOnUiThread(() -> {
@@ -1543,6 +1396,18 @@ public final class RoomDetailActivity extends Activity {
                 trendPoints.size(), stats.usageKwh, stats.costAmount,
                 recordedRechargeAmount, stats.excludedRechargeIntervals
         ));
+    }
+
+    /** 云端有新增记录时才刷新图表；页面已销毁或无新增记录时不做任何 UI 操作。 */
+    private void syncCloudHistoryInBackground(AppConfig config) {
+        if (config == null || config.roomCode == null || config.roomCode.isEmpty()) return;
+        CloudHistorySynchronizer.sync(this, roomId, config.roomCode, importedCount ->
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && historyStore != null) {
+                        refreshHistory();
+                    }
+                })
+        );
     }
 
     private void showDailyUsageChart(boolean showDaily) {

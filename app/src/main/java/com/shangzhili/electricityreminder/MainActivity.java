@@ -62,10 +62,11 @@ public final class MainActivity extends Activity {
 
         systemSettingsButton.setOnClickListener(view -> openSystemSettings());
 
-        findViewById(R.id.addRoomButton).setOnClickListener(view -> {
-            String roomId = repository.createRoomId();
-            startActivity(RoomDetailActivity.createIntent(this, roomId));
-        });
+        findViewById(R.id.addRoomButton).setOnClickListener(view ->
+                new AddRoomDialog(this, repository, roomId ->
+                        startActivity(RoomDetailActivity.createIntent(this, roomId))
+                ).show()
+        );
 
         // 首次安装只展示一次说明。用户以后仍可从首页右上角重新进入设置检查。
         showFirstUseGuideIfNeeded();

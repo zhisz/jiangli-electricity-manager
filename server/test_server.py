@@ -21,6 +21,14 @@ class PasswordTests(unittest.TestCase):
         page = app_server.login_page(notice="密码已修改 <成功>")
         self.assertIn("密码已修改 &lt;成功&gt;", page)
 
+    def test_public_history_rate_limit_is_memory_only(self):
+        limiter = app_server.PublicReadLimiter(maximum=2, window_seconds=60)
+        self.assertTrue(limiter.allow("test-client"))
+        self.assertTrue(limiter.allow("test-client"))
+        self.assertFalse(limiter.allow("test-client"))
+        # 其他来源不被同一个客户端的请求连带限制。
+        self.assertTrue(limiter.allow("other-client"))
+
 
 class AnalyticsStoreTests(unittest.TestCase):
     def setUp(self):

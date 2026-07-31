@@ -43,8 +43,10 @@ public final class AppThemeManager {
     }
 
     public static int current(Context context) {
-        int value = preferences(context).getInt(KEY_THEME_MODE, MODE_BLUE);
-        return value >= MODE_BLUE && value <= MODE_PURPLE ? value : MODE_BLUE;
+        // 新安装默认使用“静雅紫”。已经主动选择过主题的老用户仍读取原值，
+        // 这里不做强制迁移，避免升级后突然覆盖用户的个人偏好。
+        int value = preferences(context).getInt(KEY_THEME_MODE, MODE_PURPLE);
+        return value >= MODE_BLUE && value <= MODE_PURPLE ? value : MODE_PURPLE;
     }
 
     public static void save(Context context, int mode) {
@@ -52,11 +54,11 @@ public final class AppThemeManager {
         preferences(context).edit().putInt(KEY_THEME_MODE, mode).apply();
     }
 
-    /** 老用户默认保持浅色，只有主动选择后才切换为深色或跟随系统。 */
+    /** 新安装默认深色；已经保存过显示模式的用户继续保留原选择。 */
     public static int currentAppearance(Context context) {
-        int value = preferences(context).getInt(KEY_APPEARANCE_MODE, APPEARANCE_LIGHT);
+        int value = preferences(context).getInt(KEY_APPEARANCE_MODE, APPEARANCE_DARK);
         return value >= APPEARANCE_FOLLOW_SYSTEM && value <= APPEARANCE_DARK
-                ? value : APPEARANCE_LIGHT;
+                ? value : APPEARANCE_DARK;
     }
 
     public static void saveAppearance(Context context, int mode) {

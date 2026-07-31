@@ -1,5 +1,5 @@
 [Unit]
-Description=Jiangli Electricity update and anonymous analytics service
+Description=Jiangli Electricity update, analytics and public history service
 After=network.target
 
 [Service]

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  首页“添加房间”使用的悬浮窗。三级目录和备注在同一处完成，只有选到有效房间后
+  “添加”按钮才会启用，避免先生成一条未配置房间再让用户进入详情页补表单。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
+        <TextView
+            style="@style/Ui.Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="按楼栋、楼层和房间依次选择。房间备注默认使用房间名称，添加前可以直接修改。" />
+
+        <Button
+            android:id="@+id/addRoomBuildingButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_3"
+            android:gravity="start|center_vertical"
+            android:text="正在加载楼栋……" />
+
+        <Button
+            android:id="@+id/addRoomFloorButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_2"
+            android:enabled="false"
+            android:gravity="start|center_vertical"
+            android:text="选择楼层" />
+
+        <Button
+            android:id="@+id/addRoomRoomButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_2"
+            android:enabled="false"
+            android:gravity="start|center_vertical"
+            android:text="选择房间" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_4"
+            android:labelFor="@id/addRoomAliasInput"
+            android:text="房间备注"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/addRoomAliasInput"
+            style="@style/Ui.EditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_2"
+            android:hint="选择房间后自动填写"
+            android:inputType="text"
+            android:maxLength="40"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/addRoomStatusText"
+            style="@style/Ui.Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_2"
+            android:text="正在读取南昌校区房间目录……"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

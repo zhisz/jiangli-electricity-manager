@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""江理电费管家更新与匿名统计服务。
+"""江理电费管家更新、匿名统计与公共房间历史服务。
 
-只使用 Python 标准库，监听 127.0.0.1，由 Nginx 反向代理。服务端不会存储 Android ID、
-房间信息、电量数据、手机号或设备硬件标识；客户端发送的匿名设备摘要还会再经过服务器
-密钥 HMAC 后才参与去重统计。
+只使用 Python 标准库，监听 127.0.0.1，由 Nginx 反向代理。匿名统计库不会存储 Android
+ID、房间配置、手机号或设备硬件标识；客户端摘要还会再经过服务器 HMAC。独立公共历史库
+只保存白名单楼栋的公共目录和余额采样，不接收用户备注、提醒阈值或充值记录。
 """
 
 from __future__ import annotations
 
 import base64
 import datetime as dt
+import gzip
 import hashlib
 import hmac
 import html
@@ -28,6 +29,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+try:
+    # 作为 package 执行单元测试时使用相对导入；生产环境直接运行 server.py 时使用同目录导入。
+    from .public_history import (
+        CollectorScheduler,
+        PublicHistoryCollector,
+        PublicHistoryStore,
+        XiaofubaoClient,
+    )
+except ImportError:  # pragma: no cover - 生产脚本入口
+    from public_history import (
+        CollectorScheduler,
+        PublicHistoryCollector,
+        PublicHistoryStore,
+        XiaofubaoClient,
+    )
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -79,6 +96,26 @@ class Settings:
                 self.password_hash = saved_hash
         self.session_secret = _required_env("SESSION_SECRET").encode("utf-8")
         self.telemetry_key = _required_env("TELEMETRY_HMAC_KEY").encode("utf-8")
+        # 公共采样与匿名统计使用不同数据库，便于独立备份、限权和容量审计。
+        self.public_history_database_path = Path(
+            os.environ.get(
+                "PUBLIC_HISTORY_DATABASE_PATH",
+                str(self.database_path.with_name("public_history.sqlite3")),
+            )
+        )
+        self.collector_enabled = os.environ.get(
+            "PUBLIC_HISTORY_COLLECTOR_ENABLED", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        # JID 只从服务器环境读取，不写入源码、数据库、后台页面或日志。
+        self.xiaofubao_shiro_jid = os.environ.get(
+            "XIAOFUBAO_SHIRO_JID", ""
+        ).strip()
+        self.collector_request_interval = float(
+            os.environ.get("COLLECTOR_REQUEST_INTERVAL_SECONDS", "0.25")
+        )
+        self.collector_timeout = float(
+            os.environ.get("COLLECTOR_REQUEST_TIMEOUT_SECONDS", "12")
+        )
 
 
 def _required_env(name: str) -> str:
@@ -362,15 +399,71 @@ class LoginLimiter:
             self._blocked_until.pop(key, None)
 
 
+class PublicReadLimiter:
+    """公共历史按来源 IP 做内存限速；不持久化 IP，也不影响其他 API。"""
+
+    def __init__(self, maximum: int = 120, window_seconds: float = 60.0) -> None:
+        self.maximum = maximum
+        self.window_seconds = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            recent = [
+                value for value in self._requests[key]
+                if now - value < self.window_seconds
+            ]
+            if len(recent) >= self.maximum:
+                self._requests[key] = recent
+                return False
+            recent.append(now)
+            self._requests[key] = recent
+            return True
+
+
 class ElecService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.store = AnalyticsStore(settings.database_path, settings.telemetry_key)
         self.login_limiter = LoginLimiter()
+        self.public_read_limiter = PublicReadLimiter()
         self.started_at = utc_now()
         self._password_lock = threading.Lock()
         # 会话代次不落盘：修改密码或重启服务都会让旧 Cookie 立即失效。
         self._session_generation = secrets.token_urlsafe(16)
+        public_history_path = getattr(
+            settings,
+            "public_history_database_path",
+            settings.database_path.with_name("public_history.sqlite3"),
+        )
+        self.public_history_store: PublicHistoryStore | None
+        try:
+            self.public_history_store = PublicHistoryStore(public_history_path)
+        except (OSError, sqlite3.Error):
+            # 公共历史是附加能力。独立数据库损坏或目录只读时，更新、下载、匿名统计和
+            # 后台登录仍必须正常启动；公共接口单独返回 503。
+            self.public_history_store = None
+        self.collector_scheduler: CollectorScheduler | None = None
+        if (
+            self.public_history_store is not None
+            and getattr(settings, "collector_enabled", False)
+            and getattr(settings, "xiaofubao_shiro_jid", "")
+        ):
+            collector_client = XiaofubaoClient(
+                settings.xiaofubao_shiro_jid,
+                request_interval=getattr(
+                    settings, "collector_request_interval", 0.25
+                ),
+                timeout=getattr(settings, "collector_timeout", 12.0),
+                retries=2,
+            )
+            collector = PublicHistoryCollector(
+                self.public_history_store, collector_client
+            )
+            self.collector_scheduler = CollectorScheduler(collector)
+            self.collector_scheduler.start()
 
     def load_manifest(self) -> dict[str, Any]:
         with self.settings.manifest_path.open("r", encoding="utf-8") as stream:
@@ -469,6 +562,10 @@ class ElecService:
             hashlib.sha256,
         ).hexdigest()
 
+    def shutdown(self) -> None:
+        if self.collector_scheduler is not None:
+            self.collector_scheduler.stop()
+
 
 def _b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
@@ -502,6 +599,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
+        elif path == "/api/v1/public-history":
+            self._public_history()
         elif path == "/admin":
             self._redirect("/admin/")
         elif path == "/admin/login":
@@ -549,6 +648,38 @@ class Handler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     password_page(self.service.csrf_token(session)),
                 )
+        elif path == "/admin/collector":
+            session = self._session_token()
+            if not session:
+                self._redirect("/admin/login")
+                return
+            query = urllib.parse.parse_qs(
+                urllib.parse.urlsplit(self.path).query
+            )
+            day = query.get("date", [""])[0].strip()
+            building_code = query.get("buildingCode", [""])[0].strip()
+            room_code = query.get("roomCode", [""])[0].strip()
+            if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                day = ""
+            if building_code and not re.fullmatch(r"\d{9}", building_code):
+                building_code = ""
+            if room_code and not re.fullmatch(r"\d{15}", room_code):
+                room_code = ""
+            try:
+                if self.service.public_history_store is None:
+                    raise sqlite3.OperationalError("公共历史数据库暂不可用")
+                overview = self.service.public_history_store.collector_overview(
+                    day, building_code, room_code
+                )
+                self._send_html(
+                    HTTPStatus.OK,
+                    collector_page(overview, day, building_code, room_code),
+                )
+            except sqlite3.Error as exception:
+                self._send_html(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error_page("云端采集数据读取失败", str(exception)),
+                )
         elif path.startswith("/downloads/"):
             self._download(path, count=True)
         else:
@@ -591,6 +722,67 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
         except sqlite3.Error:
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "temporarily unavailable"})
+
+    def _public_history(self) -> None:
+        """公共只读接口：仅按精确 roomCode 返回最近 30 天采样，不需要或暴露凭据。"""
+
+        try:
+            if not self.service.public_read_limiter.allow(self._client_ip()):
+                self._send_json(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    {"error": "rate limit exceeded"},
+                )
+                return
+            if self.service.public_history_store is None:
+                self._send_json(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "temporarily unavailable"},
+                )
+                return
+            query = urllib.parse.parse_qs(
+                urllib.parse.urlsplit(self.path).query, keep_blank_values=True
+            )
+            room_code = query.get("roomCode", [""])[0].strip()
+            if not re.fullmatch(r"\d{15}", room_code):
+                raise ValueError("invalid room code")
+            now = dt.datetime.now(SHANGHAI)
+            earliest = now - dt.timedelta(days=30)
+            since_millis = int(query.get("sinceMillis", ["0"])[0] or 0)
+            until_millis = int(query.get("untilMillis", ["0"])[0] or 0)
+            cursor = max(0, int(query.get("cursor", ["0"])[0] or 0))
+            limit = min(500, max(1, int(query.get("limit", ["200"])[0] or 200)))
+            if since_millis > 0:
+                requested_since = dt.datetime.fromtimestamp(
+                    since_millis / 1000, tz=dt.timezone.utc
+                ).astimezone(SHANGHAI)
+                since = max(earliest, requested_since)
+            else:
+                since = earliest
+            if until_millis > 0:
+                requested_until = dt.datetime.fromtimestamp(
+                    until_millis / 1000, tz=dt.timezone.utc
+                ).astimezone(SHANGHAI)
+                until = min(now, requested_until)
+            else:
+                until = now
+            if since > until:
+                raise ValueError("invalid range")
+            result = self.service.public_history_store.public_history(
+                room_code,
+                since.isoformat(timespec="seconds"),
+                until.isoformat(timespec="seconds"),
+                cursor,
+                limit,
+            )
+            self._send_json(HTTPStatus.OK, result)
+        except (ValueError, OverflowError, OSError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
+        except sqlite3.Error:
+            # 历史库不可用时只影响补充数据；App 会静默继续使用本地数据库。
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "temporarily unavailable"},
+            )
 
     def _download(self, path: str, *, count: bool) -> None:
         requested = urllib.parse.unquote(path.removeprefix("/downloads/"))
@@ -799,7 +991,17 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
         )
-        self._send_bytes(status, body, "application/json; charset=utf-8")
+        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+        if accepts_gzip and len(body) >= 512:
+            body = gzip.compress(body, compresslevel=5)
+            self._send_bytes(
+                status,
+                body,
+                "application/json; charset=utf-8",
+                content_encoding="gzip",
+            )
+        else:
+            self._send_bytes(status, body, "application/json; charset=utf-8")
 
     def _send_html(self, status: HTTPStatus, body: str) -> None:
         self._send_bytes(
@@ -813,11 +1015,15 @@ class Handler(BaseHTTPRequestHandler):
         content_type: str | None,
         *,
         admin: bool = False,
+        content_encoding: str | None = None,
     ) -> None:
         self.send_response(status)
         self._security_headers(admin=admin)
         if content_type:
             self.send_header("Content-Type", content_type)
+        if content_encoding:
+            self.send_header("Content-Encoding", content_encoding)
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD" and body:
@@ -962,6 +1168,7 @@ def dashboard_page(
             <p class="muted">匿名使用概览 · 中国标准时间</p>
           </div>
           <div class="header-actions">
+            <a class="secondary" href="/admin/collector">云端采集</a>
             <a class="secondary" href="/admin/password">修改密码</a>
             <a class="secondary" href="/admin/">刷新数据</a>
             <form method="post" action="/admin/logout">
@@ -1032,13 +1239,13 @@ def dashboard_page(
                 <dt>服务运行时间</dt><dd>{html.escape(uptime_text)}</dd>
                 <dt>最后一次心跳</dt><dd>{html.escape(str(last_seen))}</dd>
                 <dt>统计数据库</dt><dd>{db_size}</dd>
-                <dt>隐私策略</dt><dd>不保存 Android ID、房间、电量或硬件标识</dd>
+                <dt>隐私策略</dt><dd>匿名统计不保存 Android ID 或硬件标识；公共采样与用户配置隔离</dd>
                 <dt>故障隔离</dt><dd>遥测失败不会阻塞 App 功能</dd>
               </dl>
             </article>
           </section>
         </main>
-        <footer>江理电费管家开发者后台 · 数据仅用于版本维护与匿名使用统计</footer>
+        <footer>江理电费管家开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
         """,
     )
 
@@ -1048,6 +1255,127 @@ def _metric(label: str, value: Any, detail: str) -> str:
         '<article class="metric">'
         f'<span>{html.escape(label)}</span><strong>{html.escape(str(value))}</strong>'
         f'<small>{html.escape(detail)}</small></article>'
+    )
+
+
+def collector_page(
+    overview: dict[str, Any],
+    day: str,
+    building_code: str,
+    room_code: str,
+) -> str:
+    """云端采集后台；所有变化时间均明确展示为相邻查询之间的发生区间。"""
+
+    latest = overview["latest_job"]
+    if latest:
+        progress = (
+            f'{int(latest["processed_rooms"])}/{int(latest["total_rooms"])}'
+        )
+        duration = (
+            f'{float(latest["duration_seconds"]):.1f} 秒'
+            if latest["duration_seconds"] is not None else "执行中"
+        )
+        latest_html = f"""
+        <dl>
+          <dt>轮次</dt><dd>{html.escape(str(latest["slot_time"]))}</dd>
+          <dt>状态</dt><dd>{html.escape(str(latest["status"]))}</dd>
+          <dt>进度</dt><dd>{progress}</dd>
+          <dt>成功 / 失败</dt><dd>{int(latest["success_count"])} / {int(latest["failure_count"])}</dd>
+          <dt>耗时</dt><dd>{duration}</dd>
+          <dt>最近错误</dt><dd>{html.escape(str(latest["last_error_type"] or "无"))}</dd>
+        </dl>
+        """
+    else:
+        latest_html = '<p class="muted">尚无采集任务</p>'
+
+    building_rows = "".join(
+        f"""
+        <tr><td>{html.escape(str(row["building_name"]))}</td>
+        <td class="mono">{html.escape(str(row["building_code"]))}</td>
+        <td>{int(row["room_count"] or 0)}</td>
+        <td>{int(row["no_meter_count"] or 0)}</td></tr>
+        """
+        for row in overview["buildings"]
+    ) or '<tr><td colspan="4" class="muted">尚未同步房间目录</td></tr>'
+    failure_rows = "".join(
+        f"<tr><td>{html.escape(str(row['error_type']))}</td><td>{int(row['count'])}</td></tr>"
+        for row in overview["failures"]
+    ) or '<tr><td colspan="2" class="muted">筛选范围内无失败</td></tr>'
+    distribution_rows = "".join(
+        f"<tr><td>{html.escape(str(row['hour']))}:00–下一次查询</td>"
+        f"<td>{html.escape(str(row['inferred_type']))}</td><td>{int(row['count'])}</td></tr>"
+        for row in overview["distribution"]
+    ) or '<tr><td colspan="3" class="muted">筛选范围内暂无余额变化</td></tr>'
+    event_rows = "".join(
+        f"""
+        <tr>
+          <td>{html.escape(str(row["building_name"]))}</td>
+          <td class="mono">{html.escape(str(row["room_code"]))}</td>
+          <td>{html.escape(str(row["previous_query_time"]))}<br>至<br>
+              {html.escape(str(row["current_query_time"]))}</td>
+          <td>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f}</td>
+          <td>{float(row["delta_balance"]):+.2f}</td>
+          <td>{html.escape(str(row["inferred_type"]))}</td>
+        </tr>
+        """
+        for row in overview["events"]
+    ) or '<tr><td colspan="6" class="muted">筛选范围内暂无变化事件</td></tr>'
+
+    return page_shell(
+        "云端采集",
+        f"""
+        <header class="topbar">
+          <div><div class="eyebrow">PUBLIC HISTORY</div><h1>云端采集</h1>
+          <p class="muted">公共房间采样 · Asia/Shanghai · 仅保留最近 30 天</p></div>
+          <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
+        </header>
+        <main>
+          <section class="filter-panel panel">
+            <form method="get" action="/admin/collector" class="filters">
+              <label>日期<input name="date" type="date" value="{html.escape(day)}"></label>
+              <label>楼栋代码<input name="buildingCode" inputmode="numeric" maxlength="9"
+                value="{html.escape(building_code)}" placeholder="9 位代码"></label>
+              <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
+                value="{html.escape(room_code)}" placeholder="15 位代码"></label>
+              <button type="submit">筛选</button>
+              <a class="secondary" href="/admin/collector">清除</a>
+            </form>
+          </section>
+          <section class="metric-grid collector-metrics">
+            {_metric("样本总数", overview["total"], "当前筛选范围")}
+            {_metric("成功样本", overview["success"], "可供 App 合并")}
+            {_metric("失败样本", overview["failure"], "保留分类，不含原始响应")}
+            {_metric("成功率", f'{overview["success_rate"]:.2f}%', "成功 / 全部请求")}
+            {_metric("历史数据库", _format_bytes(int(overview["database_bytes"])), "SQLite 文件")}
+          </section>
+          <section class="two-column">
+            <article class="panel"><div class="panel-title"><h2>最近任务</h2></div>{latest_html}</article>
+            <article class="panel"><div class="panel-title"><h2>各楼栋房间数</h2></div>
+              <div class="table-wrap"><table><thead><tr><th>楼栋</th><th>代码</th>
+              <th>有效房间</th><th>无电表</th></tr></thead><tbody>{building_rows}</tbody></table></div>
+            </article>
+          </section>
+          <section class="two-column">
+            <article class="panel"><div class="panel-title"><h2>失败原因</h2></div>
+              <table><thead><tr><th>分类</th><th>次数</th></tr></thead>
+              <tbody>{failure_rows}</tbody></table>
+            </article>
+            <article class="panel"><div class="panel-title"><h2>变化时段分布</h2></div>
+              <p class="muted panel-help">整点采样无法确定平台真实更新时间，仅统计变化发生区间。</p>
+              <table><thead><tr><th>查询区间</th><th>推测类型</th><th>次数</th></tr></thead>
+              <tbody>{distribution_rows}</tbody></table>
+            </article>
+          </section>
+          <section class="panel" style="margin-top:16px">
+            <div class="panel-title"><div><h2>最近变化事件</h2>
+              <p class="muted">最多显示 200 条；时间表示相邻两次查询之间。</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>楼栋</th><th>房间</th>
+              <th>变化发生区间</th><th>余额</th><th>变化量</th><th>推测类型</th></tr></thead>
+              <tbody>{event_rows}</tbody></table></div>
+          </section>
+        </main>
+        <footer>云端仅保存公共房间采样；用户备注、提醒和充值数据只保存在用户手机</footer>
+        """,
     )
 
 
@@ -1133,6 +1461,11 @@ def page_shell(title: str, content: str) -> str:
       border:1px solid var(--border); border-radius:10px; background:var(--surface);
       color:var(--text); font:inherit; }}
     .login-card button {{ width:100%; margin-top:14px; }}
+    .filters {{ display:flex; align-items:end; gap:10px; flex-wrap:wrap; }}
+    .filters label {{ display:grid; gap:6px; color:var(--muted); font-size:12px; }}
+    .filters input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+      border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
+    .collector-metrics {{ grid-template-columns:repeat(5,1fr); margin-top:16px; }}
     .error {{ margin-top:16px; padding:12px; border-radius:10px;
       background:#fdecec; color:var(--danger); }}
     .notice {{ margin-top:16px; padding:12px; border-radius:10px;
@@ -1140,6 +1473,7 @@ def page_shell(title: str, content: str) -> str:
     @media(max-width:920px) {{
       .metric-grid {{ grid-template-columns:repeat(3,1fr); }}
       .two-column {{ grid-template-columns:1fr; }}
+      .collector-metrics {{ grid-template-columns:repeat(3,1fr); }}
     }}
     @media(max-width:560px) {{
       .topbar {{ align-items:flex-start; flex-direction:column; padding-top:28px; }}
@@ -1172,6 +1506,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        service.shutdown()
         server.server_close()
 
 

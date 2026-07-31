@@ -25,7 +25,7 @@ import java.util.UUID;
  */
 public final class ReadingHistoryStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "reading_history.db";
-    private static final int DATABASE_VERSION = 5;
+    private static final int DATABASE_VERSION = 7;
     private static final long RETENTION_MILLIS = 400L * 24 * 60 * 60 * 1_000;
 
     public ReadingHistoryStore(Context context) {
@@ -41,11 +41,13 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                         + "sample_time INTEGER NOT NULL,"
                         + "surplus REAL NOT NULL,"
                         + "amount REAL NOT NULL,"
-                        + "source TEXT NOT NULL)"
+                        + "source TEXT NOT NULL,"
+                        + "cloud_sample_key TEXT)"
         );
         database.execSQL(
                 "CREATE INDEX readings_room_time ON readings(room_id, sample_time)"
         );
+        createCloudHistoryIndex(database);
         createRechargeSchema(database);
         createRechargeAttemptSchema(database);
     }
@@ -66,6 +68,17 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
             // v4 使用余额上涨推测到账；v5 追加官方 payNo，并安全终止无法精确查询的旧尝试。
             migrateRechargeAttemptsToOfficialOrder(database);
         }
+        if (oldVersion < 6) {
+            // v6 只给 readings 增加可空幂等键。已有本地记录全部保持 NULL，
+            // 充值表和用户历史不会被重写；随后建立的部分唯一索引只约束云端记录。
+            database.execSQL("ALTER TABLE readings ADD COLUMN cloud_sample_key TEXT");
+        }
+        if (oldVersion < 7) {
+            // 开发期 v6 曾把 cloud_sample_key 设为全库唯一，导致同一物理房间以两个备注
+            // 添加时第二个本地 roomId 无法导入。v7 改成“本地房间 + 云端键”联合唯一。
+            database.execSQL("DROP INDEX IF EXISTS readings_cloud_sample_key");
+            createCloudHistoryIndex(database);
+        }
     }
 
     public void record(String roomId, Reading reading, String source) {
@@ -83,6 +96,74 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                 "readings", "sample_time < ?",
                 new String[]{Long.toString(System.currentTimeMillis() - RETENTION_MILLIS)}
         );
+    }
+
+    /**
+     * 把公共云端采样合并到当前用户的本地 roomId。
+     *
+     * <p>云端按真实 roomCode 提供公共数据，本地仍按随机 roomId 隔离用户配置。方法先校验
+     * 每条记录的 roomCode，再以 cloud_sample_key INSERT OR IGNORE；因此重复请求、分页
+     * 重叠和进程重试都不会插入重复点。这里只写 readings，绝不访问或覆盖 recharges。</p>
+     */
+    public int mergeCloudHistory(
+            String roomId,
+            String expectedRoomCode,
+            List<CloudHistoryRecord> records
+    ) {
+        if (roomId == null || roomId.isEmpty()
+                || expectedRoomCode == null
+                || !expectedRoomCode.matches("\\d{15}")
+                || records == null
+                || records.isEmpty()) {
+            return 0;
+        }
+        SQLiteDatabase database = getWritableDatabase();
+        int imported = 0;
+        database.beginTransaction();
+        try {
+            for (CloudHistoryRecord record : records) {
+                if (record == null
+                        || !record.isValidSuccess()
+                        || !expectedRoomCode.equals(record.roomCode)) {
+                    continue;
+                }
+                ContentValues values = new ContentValues();
+                values.put("room_id", roomId);
+                values.put("sample_time", record.queriedAt);
+                values.put("surplus", record.surplus);
+                values.put("amount", record.amount);
+                values.put("source", "cloud");
+                values.put("cloud_sample_key", record.sampleKey);
+                long inserted = database.insertWithOnConflict(
+                        "readings", null, values, SQLiteDatabase.CONFLICT_IGNORE
+                );
+                if (inserted != -1) imported++;
+            }
+            database.delete(
+                    "readings", "sample_time < ?",
+                    new String[]{Long.toString(
+                            System.currentTimeMillis() - RETENTION_MILLIS
+                    )}
+            );
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
+        }
+        return imported;
+    }
+
+    /** 返回该本地房间最近一次已导入云端采样的时间，用于下次增量查询。 */
+    public long latestCloudTimestamp(String roomId) {
+        Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT MAX(sample_time) FROM readings "
+                        + "WHERE room_id = ? AND cloud_sample_key IS NOT NULL",
+                new String[]{roomId}
+        );
+        try {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getLong(0) : 0;
+        } finally {
+            cursor.close();
+        }
     }
 
     public List<HistoryPoint> loadDailyPoints(String roomId, int days) {
@@ -613,6 +694,14 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
         database.execSQL(
                 "CREATE INDEX IF NOT EXISTS recharges_room_time "
                         + "ON recharges(room_id, recharge_time)"
+        );
+    }
+
+    private void createCloudHistoryIndex(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS readings_room_cloud_sample_key "
+                        + "ON readings(room_id, cloud_sample_key) "
+                        + "WHERE cloud_sample_key IS NOT NULL"
         );
     }
 

@@ -404,31 +404,20 @@
                 android:text="保存设置后显示监测计划" />
         </LinearLayout>
 
-        <!-- 房间信息与提醒规则默认折叠，点击标题展开；输入内容不会因折叠而清空。 -->
-        <Button
-            android:id="@+id/roomInfoHeaderButton"
-            style="@style/Ui.Button.Secondary"
+        <!-- 房间码已在首页添加窗口确定，详情页只保留用户真正需要修改的备注。 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/space_3"
-            android:gravity="start|center_vertical"
-            android:text="房间信息  ▾" />
-
-        <LinearLayout
-            android:id="@+id/roomInfoContent"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_2"
             android:background="@drawable/room_card_background"
             android:orientation="vertical"
-            android:padding="@dimen/card_padding"
-            android:visibility="gone">
+            android:padding="@dimen/card_padding">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:labelFor="@id/aliasInput"
-                android:text="房间别名"
+                android:text="房间备注"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -446,8 +435,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:hint="例如：宿舍"
+                    android:hint="例如：我的宿舍"
                     android:inputType="text"
+                    android:maxLength="40"
                     android:maxLines="1" />
 
                 <Button
@@ -457,67 +447,6 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="@dimen/space_2"
                     android:text="保存" />
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/selectRoomButton"
-                style="@style/Ui.Button.Secondary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:text="选择楼栋、楼层和房间" />
-
-            <TextView
-                android:id="@+id/selectedRoomText"
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:text="尚未选择房间" />
-
-            <Button
-                android:id="@+id/manualCodeToggleButton"
-                style="@style/Ui.Button.Text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_1"
-                android:text="高级：手动填写房间码" />
-
-            <LinearLayout
-                android:id="@+id/manualCodeContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:labelFor="@id/roomCodeInput"
-                    android:text="完整房间代码"
-                    android:textColor="@color/text_primary"
-                    android:textStyle="bold" />
-
-                <EditText
-                    android:id="@+id/roomCodeInput"
-                    style="@style/Ui.EditText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:digits="0123456789"
-                    android:hint="15 位房间码"
-                    android:inputType="number"
-                    android:maxLength="15"
-                    android:maxLines="1" />
-
-                <TextView
-                    style="@style/Ui.Text.Body"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_1"
-                    android:text="仅在联网选择暂时不可用时使用。"
-                    android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 
