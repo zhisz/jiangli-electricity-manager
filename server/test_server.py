@@ -97,6 +97,27 @@ class CollectorAdminParameterTests(unittest.TestCase):
         self.assertNotIn("-123.4", fragment)
         self.assertNotIn("-74.04", fragment)
 
+    def test_task_metrics_use_current_round_scope(self):
+        fragment = app_server.collector_task_fragment({
+            "latest_job": {
+                "total_rooms": 1412, "processed_rooms": 1412,
+                "success_count": 1412, "failure_count": 0,
+                "duration_seconds": 400.0, "status": "completed",
+                "slot_time": "2026-07-31T18:00:00+08:00",
+                "started_at": "2026-07-31T18:00:01+08:00",
+                "finished_at": "2026-07-31T18:06:41+08:00",
+            },
+            "current_round": 11, "round_total": 13,
+            "total_samples": 14120, "database_bytes": 1024,
+            "current_building": "本轮已完成", "no_meter_count": 0,
+            "covered_buildings": 12, "valid_rooms": 1412,
+            "buildings": [], "failures": [],
+        })
+        self.assertIn("本轮应采", fragment)
+        self.assertIn("本轮成功", fragment)
+        self.assertIn("近30天累计 14120 条样本", fragment)
+        self.assertNotIn("样本总数", fragment)
+
 
 class AnalyticsStoreTests(unittest.TestCase):
     def setUp(self):
