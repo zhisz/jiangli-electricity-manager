@@ -25,7 +25,7 @@ import java.util.UUID;
  */
 public final class ReadingHistoryStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "reading_history.db";
-    private static final int DATABASE_VERSION = 7;
+    private static final int DATABASE_VERSION = 9;
     private static final long RETENTION_MILLIS = 400L * 24 * 60 * 60 * 1_000;
 
     public ReadingHistoryStore(Context context) {
@@ -42,7 +42,9 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                         + "surplus REAL NOT NULL,"
                         + "amount REAL NOT NULL,"
                         + "source TEXT NOT NULL,"
-                        + "cloud_sample_key TEXT)"
+                        + "cloud_sample_key TEXT,"
+                        + "change_start_time INTEGER,"
+                        + "change_type TEXT)"
         );
         database.execSQL(
                 "CREATE INDEX readings_room_time ON readings(room_id, sample_time)"
@@ -78,6 +80,37 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
             // 添加时第二个本地 roomId 无法导入。v7 改成“本地房间 + 云端键”联合唯一。
             database.execSQL("DROP INDEX IF EXISTS readings_cloud_sample_key");
             createCloudHistoryIndex(database);
+        }
+        if (oldVersion >= 2 && oldVersion < 8) {
+            /*
+             * 旧版只有一张充值表，无法区分“用户手工登记”和“校付宝官方订单确认”。
+             * 默认值 deliberately 设为 manual：不能把历史手填金额冒充为官方支付事实。
+             * 记录不会丢失，月度统计等既有功能仍可读取全部充值。
+             */
+            database.execSQL(
+                    "ALTER TABLE recharges ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+            );
+            /*
+             * v5～v7 已经保存了官方确认 attempt 与 recharge_id 的关联，可无歧义恢复来源；
+             * 更早或单纯手填的旧记录继续保持 manual，避免错误参与精确趋势校正。
+             */
+            if (oldVersion >= 5) {
+                database.execSQL(
+                        "UPDATE recharges SET source = 'official' WHERE id IN ("
+                                + "SELECT recharge_id FROM recharge_attempts "
+                                + "WHERE status = 'confirmed' AND recharge_id IS NOT NULL)"
+                );
+            }
+        }
+        if (oldVersion < 9) {
+            database.execSQL("ALTER TABLE readings ADD COLUMN change_start_time INTEGER");
+            database.execSQL("ALTER TABLE readings ADD COLUMN change_type TEXT");
+            /*
+             * 旧云端缓存没有变化事件字段。它本来就是可重新下载的公共副本，因此只删除
+             * source=cloud 的记录，让下一次详情页同步重新获取最近 30 天事件；用户本地
+             * 手动/后台查询、充值记录、房间别名和提醒配置完全不动。
+             */
+            database.delete("readings", "source = ?", new String[]{"cloud"});
         }
     }
 
@@ -134,6 +167,12 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                 values.put("amount", record.amount);
                 values.put("source", "cloud");
                 values.put("cloud_sample_key", record.sampleKey);
+                if (record.changeStartAt > 0) {
+                    values.put("change_start_time", record.changeStartAt);
+                }
+                if (!record.changeType.isEmpty()) {
+                    values.put("change_type", record.changeType);
+                }
                 long inserted = database.insertWithOnConflict(
                         "readings", null, values, SQLiteDatabase.CONFLICT_IGNORE
                 );
@@ -170,7 +209,10 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
         long since = System.currentTimeMillis() - days * 24L * 60 * 60 * 1_000;
         Cursor cursor = getReadableDatabase().query(
                 "readings",
-                new String[]{"sample_time", "surplus", "amount"},
+                new String[]{
+                        "sample_time", "surplus", "amount",
+                        "change_start_time", "change_type"
+                },
                 "room_id = ? AND sample_time >= ?",
                 new String[]{roomId, Long.toString(since)},
                 null, null, "sample_time ASC"
@@ -183,9 +225,7 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
             while (cursor.moveToNext()) {
                 long timestamp = cursor.getLong(0);
                 LocalDate date = Instant.ofEpochMilli(timestamp).atZone(zoneId).toLocalDate();
-                daily.put(date, new HistoryPoint(
-                        timestamp, cursor.getDouble(1), cursor.getDouble(2)
-                ));
+                daily.put(date, historyPoint(cursor));
             }
         } finally {
             cursor.close();
@@ -203,7 +243,10 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
         long since = System.currentTimeMillis() - (hours + 2L) * 60 * 60 * 1_000;
         Cursor cursor = getReadableDatabase().query(
                 "readings",
-                new String[]{"sample_time", "surplus", "amount"},
+                new String[]{
+                        "sample_time", "surplus", "amount",
+                        "change_start_time", "change_type"
+                },
                 "room_id = ? AND sample_time >= ?",
                 new String[]{roomId, Long.toString(since)},
                 null, null, "sample_time ASC"
@@ -218,14 +261,23 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                         .truncatedTo(ChronoUnit.HOURS)
                         .toInstant()
                         .toEpochMilli();
-                hourly.put(hourStart, new HistoryPoint(
-                        timestamp, cursor.getDouble(1), cursor.getDouble(2)
-                ));
+                hourly.put(hourStart, historyPoint(cursor));
             }
         } finally {
             cursor.close();
         }
         return new ArrayList<>(hourly.values());
+    }
+
+    /** 同时兼容本地无事件采样和服务器带变化区间的公共采样。 */
+    private HistoryPoint historyPoint(Cursor cursor) {
+        return new HistoryPoint(
+                cursor.getLong(0),
+                cursor.getDouble(1),
+                cursor.getDouble(2),
+                cursor.isNull(3) ? 0 : cursor.getLong(3),
+                cursor.isNull(4) ? "" : cursor.getString(4)
+        );
     }
 
     /**
@@ -250,6 +302,7 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
         values.put("recharge_date", date.toEpochDay());
         values.put("recharge_time", timestamp);
         values.put("amount", amount);
+        values.put("source", "manual");
         long id = database.insertOrThrow("recharges", null, values);
 
         // 余额原始数据只保留约 400 天；更早的充值已没有对应采样可用于修正，因此同步清理。
@@ -569,6 +622,7 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
             recharge.put("recharge_date", date.toEpochDay());
             recharge.put("recharge_time", timestamp);
             recharge.put("amount", attempt.requestedCents / 100.0);
+            recharge.put("source", "official");
             long rechargeId = database.insertOrThrow("recharges", null, recharge);
             database.delete(
                     "recharges", "recharge_time < ?",
@@ -646,7 +700,7 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
     public List<RechargeRecord> loadRecharges(String roomId) {
         Cursor cursor = getReadableDatabase().query(
                 "recharges",
-                new String[]{"id", "recharge_time", "amount"},
+                new String[]{"id", "recharge_time", "amount", "source"},
                 "room_id = ?", new String[]{roomId},
                 null, null, "recharge_time ASC, id ASC"
         );
@@ -655,7 +709,8 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
         try {
             while (cursor.moveToNext()) {
                 result.add(new RechargeRecord(
-                        cursor.getLong(0), cursor.getLong(1), cursor.getDouble(2), zoneId
+                        cursor.getLong(0), cursor.getLong(1), cursor.getDouble(2), zoneId,
+                        "official".equals(cursor.getString(3))
                 ));
             }
         } finally {
@@ -685,7 +740,8 @@ public final class ReadingHistoryStore extends SQLiteOpenHelper {
                         + "room_id TEXT NOT NULL,"
                         + "recharge_date INTEGER NOT NULL,"
                         + "recharge_time INTEGER NOT NULL,"
-                        + "amount REAL NOT NULL)"
+                        + "amount REAL NOT NULL,"
+                        + "source TEXT NOT NULL DEFAULT 'manual')"
         );
         database.execSQL(
                 "CREATE INDEX IF NOT EXISTS recharges_room_date "

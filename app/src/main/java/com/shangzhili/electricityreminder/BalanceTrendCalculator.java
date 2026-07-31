@@ -1,21 +1,24 @@
 package com.shangzhili.electricityreminder;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 将小时采样转换为“余额 + 延迟更新感知的时段耗电速率”。
+ * 生成“平台余额事实层 + 延迟更新估算层”。
  *
- * <p>校付宝余额并非实时结算。若接口连续返回 100、100、100、94，不能把前两小时画成
- * 零、最后一小时画成 6 度。本算法会等到 94 这一新值确认累计变化，再把 6 度按三个小时
- * 的实际时长均摊为约 2 度/小时，同时把估算余额画成 100、98、96、94。</p>
- *
- * <p>尚未等到下一次余额变化的尾部平台没有足够信息，明确标为“等待数据源结算”，不会
- * 猜测为零。充值仍按精确时间逐笔加入累计余额，所以同一天多笔充值可以落入各自时段。</p>
+ * <p>平台采样永远保存在 {@link BalanceTrendPoint#reading} 中，绘图时使用阶梯线原样展示。
+ * 估算层只回答“已经确认的累计变化较可能分布在哪些小时”，绝不把插值值写回数据库。
+ * 一旦平台给出下一次变化，同一确认窗口会重新计算，且所有小时用量之和严格等于窗口
+ * 两端余额差（加上期间官方确认的充值）。</p>
  */
 public final class BalanceTrendCalculator {
     private static final double CHANGE_TOLERANCE = 0.005;
     private static final double INCREASE_TOLERANCE = 0.01;
+    private static final long HOUR_MILLIS = 3_600_000L;
+    private static final long SEVEN_DAYS_MILLIS = 7L * 24 * HOUR_MILLIS;
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
 
     private BalanceTrendCalculator() {
     }
@@ -28,6 +31,7 @@ public final class BalanceTrendCalculator {
         if (readings == null || readings.isEmpty()) return result;
         List<RechargeRecord> safeRecharges =
                 recharges == null ? new ArrayList<>() : recharges;
+        RateHistory history = new RateHistory();
 
         HistoryPoint first = readings.get(0);
         result.add(new BalanceTrendPoint(
@@ -38,133 +42,176 @@ public final class BalanceTrendCalculator {
 
         int blockStart = 0;
         for (int index = 1; index < readings.size(); index++) {
-            if (!hasMeaningfulChange(readings.get(index - 1), readings.get(index))) {
-                continue;
-            }
+            if (!hasMeaningfulChange(readings.get(index - 1), readings.get(index))) continue;
             appendConfirmedBlock(
-                    readings, safeRecharges, blockStart, index, result
+                    readings, safeRecharges, blockStart, index, result, history
             );
             blockStart = index;
         }
-        appendAwaitingTail(readings, safeRecharges, blockStart, result);
+        appendAwaitingTail(readings, safeRecharges, blockStart, result, history);
         return result;
     }
 
     /**
-     * 把“最后一次已变化读数 → 下一次变化读数”作为一个确认窗口，再按每个子区间的
-     * 实际毫秒数分配累计消费。这样即使系统闹钟稍有延迟，总量和平均速率仍保持一致。
+     * 将已确认的累计消耗按“过去 7 天相同时段速率”分配。历史样本不够时才均匀分配；
+     * 最后一个区间吸收浮点误差，因此分配总和不会慢慢偏离平台真实累计差。
      */
     private static void appendConfirmedBlock(
             List<HistoryPoint> readings,
             List<RechargeRecord> recharges,
             int startIndex,
             int endIndex,
-            List<BalanceTrendPoint> result
+            List<BalanceTrendPoint> result,
+            RateHistory history
     ) {
         HistoryPoint start = readings.get(startIndex);
         HistoryPoint end = readings.get(endIndex);
         long durationMillis = end.timestamp - start.timestamp;
-        double totalHours = durationMillis / 3_600_000.0;
+        double totalHours = durationMillis / (double) HOUR_MILLIS;
         RechargeSummary totalRecharge = rechargeSummary(
                 recharges, start.timestamp, end.timestamp
         );
         double amountDrop = start.amount + totalRecharge.amount - end.amount;
-        double surplusDrop = start.surplus - end.surplus;
-        boolean unmatchedIncrease = (totalRecharge.amount <= 0
-                && surplusDrop < -INCREASE_TOLERANCE)
-                || (totalRecharge.amount > 0 && amountDrop < -INCREASE_TOLERANCE);
         double unitPrice = inferredUnitPrice(start, end);
-        boolean valid = totalHours > 0.01 && !unmatchedIncrease;
-
+        double rechargeKwh = unitPrice > 0 ? totalRecharge.amount / unitPrice : 0;
+        double surplusDrop = start.surplus + rechargeKwh - end.surplus;
+        boolean unmatchedIncrease = surplusDrop < -INCREASE_TOLERANCE
+                || amountDrop < -INCREASE_TOLERANCE;
+        boolean valid = totalHours > 0.01 && !unmatchedIncrease
+                && (totalRecharge.amount <= 0 || unitPrice > 0);
+        double totalUsage = valid ? Math.max(0, surplusDrop) : 0;
         double totalCost = valid ? Math.max(0, amountDrop) : 0;
-        double totalUsage = 0;
-        if (valid) {
-            if (totalRecharge.amount > 0) {
-                if (unitPrice <= 0) valid = false;
-                else totalUsage = totalCost / unitPrice;
-            } else {
-                totalUsage = Math.max(0, surplusDrop);
-            }
-        }
 
-        boolean estimated = endIndex - startIndex > 1;
-        for (int index = startIndex + 1; index <= endIndex; index++) {
+        int intervalCount = endIndex - startIndex;
+        double[] rawWeights = new double[intervalCount];
+        boolean enoughHistory = history.sizeSince(start.timestamp - SEVEN_DAYS_MILLIS) >= 3;
+        double weightSum = 0;
+        for (int offset = 0; offset < intervalCount; offset++) {
+            HistoryPoint previous = readings.get(startIndex + offset);
+            HistoryPoint current = readings.get(startIndex + offset + 1);
+            double hours = Math.max(0, (current.timestamp - previous.timestamp)
+                    / (double) HOUR_MILLIS);
+            double rate = enoughHistory
+                    ? history.meanForHour(hourOf(previous.timestamp),
+                    start.timestamp - SEVEN_DAYS_MILLIS)
+                    : Double.NaN;
+            if (!Double.isFinite(rate)) rate = history.meanSince(
+                    start.timestamp - SEVEN_DAYS_MILLIS
+            );
+            rawWeights[offset] = Double.isFinite(rate) && rate > 0 ? rate * hours : hours;
+            weightSum += rawWeights[offset];
+        }
+        if (weightSum <= 0) weightSum = intervalCount;
+
+        double usedSoFar = 0;
+        double costSoFar = 0;
+        double cumulativeOfficialAmount = 0;
+        for (int offset = 0; offset < intervalCount; offset++) {
+            int index = startIndex + offset + 1;
             HistoryPoint previous = readings.get(index - 1);
             HistoryPoint current = readings.get(index);
-            double intervalFraction = durationMillis <= 0 ? 0
-                    : (current.timestamp - previous.timestamp) / (double) durationMillis;
-            double elapsedFraction = durationMillis <= 0 ? 0
-                    : (current.timestamp - start.timestamp) / (double) durationMillis;
             RechargeSummary intervalRecharge = rechargeSummary(
                     recharges, previous.timestamp, current.timestamp
             );
-            RechargeSummary cumulativeRecharge = rechargeSummary(
-                    recharges, start.timestamp, current.timestamp
-            );
-
-            double displayedAmount = current.amount;
-            double displayedSurplus = current.surplus;
-            if (valid) {
-                displayedAmount = start.amount + cumulativeRecharge.amount
-                        - totalCost * elapsedFraction;
-                double cumulativeRechargeKwh = totalRecharge.amount > 0 && unitPrice > 0
-                        ? cumulativeRecharge.amount / unitPrice : 0;
-                displayedSurplus = start.surplus + cumulativeRechargeKwh
-                        - totalUsage * elapsedFraction;
-            }
-            double intervalHours =
-                    (current.timestamp - previous.timestamp) / 3_600_000.0;
-            double intervalUsage = valid ? totalUsage * intervalFraction : 0;
-            double intervalCost = valid ? totalCost * intervalFraction : 0;
+            cumulativeOfficialAmount += intervalRecharge.amount;
+            double fraction = rawWeights[offset] / weightSum;
+            double intervalUsage = offset == intervalCount - 1
+                    ? totalUsage - usedSoFar : totalUsage * fraction;
+            double intervalCost = offset == intervalCount - 1
+                    ? totalCost - costSoFar : totalCost * fraction;
+            usedSoFar += intervalUsage;
+            costSoFar += intervalCost;
+            double intervalHours = (current.timestamp - previous.timestamp)
+                    / (double) HOUR_MILLIS;
+            double displayedAmount = valid
+                    ? start.amount + cumulativeOfficialAmount - costSoFar : current.amount;
+            double displayedSurplus = valid
+                    ? start.surplus + (unitPrice > 0
+                    ? cumulativeOfficialAmount / unitPrice : 0) - usedSoFar
+                    : current.surplus;
             result.add(new BalanceTrendPoint(
-                    current,
-                    displayedSurplus,
-                    displayedAmount,
-                    previous.timestamp,
-                    intervalUsage,
-                    intervalCost,
+                    current, displayedSurplus, displayedAmount, previous.timestamp,
+                    valid ? intervalUsage : 0, valid ? intervalCost : 0,
                     valid && intervalHours > 0 ? intervalUsage / intervalHours : 0,
                     valid && intervalHours > 0 ? intervalCost / intervalHours : 0,
-                    intervalRecharge.amount,
-                    intervalRecharge.count,
-                    valid,
-                    unmatchedIncrease,
-                    estimated,
-                    false,
-                    totalHours
+                    intervalRecharge.amount, intervalRecharge.count,
+                    valid, unmatchedIncrease, valid && intervalCount > 1,
+                    false, totalHours
             ));
+        }
+
+        // 只有确认窗口才可反过来训练未来预测；未确认上涨绝不能污染历史小时模型。
+        if (valid) {
+            for (int offset = 0; offset < intervalCount; offset++) {
+                BalanceTrendPoint point = result.get(result.size() - intervalCount + offset);
+                history.add(point.reading.timestamp, hourOf(point.intervalStart),
+                        point.rateKwhPerHour);
+            }
         }
     }
 
     /**
-     * 最后一次变化之后的相同余额尚未被数据源结算。保留接口原值画虚线，并把速率标成未知；
-     * 等后续某小时出现新值后，这些点会自动进入 confirmed block 并回填平均速率。
+     * 平台尚未给出下一次变化时，使用最近 7 天同小时速率预测尾部消耗。阴影范围使用
+     * 历史均值 ± 1.28 个标准差（约 80% 经验区间）；样本不足时不伪造预测线，只保留
+     * “等待平台更新”，直至积累出至少一个可用的已确认速率。
      */
     private static void appendAwaitingTail(
             List<HistoryPoint> readings,
             List<RechargeRecord> recharges,
             int blockStart,
-            List<BalanceTrendPoint> result
+            List<BalanceTrendPoint> result,
+            RateHistory history
     ) {
+        HistoryPoint start = readings.get(blockStart);
+        double displayedSurplus = start.surplus;
+        double displayedAmount = start.amount;
+        double lowConsumption = 0;
+        double highConsumption = 0;
+        double unitPrice = inferredUnitPrice(start, start);
         for (int index = blockStart + 1; index < readings.size(); index++) {
             HistoryPoint previous = readings.get(index - 1);
             HistoryPoint current = readings.get(index);
+            double hours = Math.max(0, (current.timestamp - previous.timestamp)
+                    / (double) HOUR_MILLIS);
+            long since = current.timestamp - SEVEN_DAYS_MILLIS;
+            RateStats stats = history.statsForHour(hourOf(previous.timestamp), since);
+            if (stats.count == 0) stats = history.statsSince(since);
+            boolean forecastAvailable = stats.count > 0 && stats.mean >= 0;
+            double predictedUsage = forecastAvailable ? stats.mean * hours : 0;
+            double deviation = stats.count >= 2 ? 1.28 * stats.standardDeviation()
+                    : stats.mean * 0.5;
+            double intervalLow = forecastAvailable
+                    ? Math.max(0, stats.mean - deviation) * hours : 0;
+            double intervalHigh = forecastAvailable
+                    ? Math.max(intervalLow, stats.mean + deviation) * hours : 0;
             RechargeSummary intervalRecharge = rechargeSummary(
                     recharges, previous.timestamp, current.timestamp
             );
+            double rechargeKwh = unitPrice > 0 ? intervalRecharge.amount / unitPrice : 0;
+            displayedSurplus += rechargeKwh - predictedUsage;
+            displayedAmount += intervalRecharge.amount - predictedUsage * unitPrice;
+            lowConsumption += intervalLow;
+            highConsumption += intervalHigh;
+            double cumulativeRecharge = rechargeSummary(
+                    recharges, start.timestamp, current.timestamp
+            ).amount;
+            double baseWithRecharge = start.surplus
+                    + (unitPrice > 0 ? cumulativeRecharge / unitPrice : 0);
+            double highBalance = baseWithRecharge - lowConsumption;
+            double lowBalance = baseWithRecharge - highConsumption;
             result.add(new BalanceTrendPoint(
-                    current,
-                    current.surplus,
-                    current.amount,
-                    previous.timestamp,
-                    0, 0, 0, 0,
-                    intervalRecharge.amount,
-                    intervalRecharge.count,
-                    false,
-                    false,
-                    false,
-                    true,
-                    (current.timestamp - readings.get(blockStart).timestamp) / 3_600_000.0
+                    current, forecastAvailable ? displayedSurplus : current.surplus,
+                    forecastAvailable ? displayedAmount : current.amount,
+                    previous.timestamp, predictedUsage, predictedUsage * unitPrice,
+                    forecastAvailable ? stats.mean : 0,
+                    forecastAvailable ? stats.mean * unitPrice : 0,
+                    intervalRecharge.amount, intervalRecharge.count,
+                    forecastAvailable, false, forecastAvailable, true,
+                    (current.timestamp - start.timestamp) / (double) HOUR_MILLIS,
+                    forecastAvailable ? lowBalance : current.surplus,
+                    forecastAvailable ? highBalance : current.surplus,
+                    forecastAvailable ? lowBalance * unitPrice : current.amount,
+                    forecastAvailable ? highBalance * unitPrice : current.amount
             ));
         }
     }
@@ -174,18 +221,24 @@ public final class BalanceTrendCalculator {
                 || Math.abs(previous.amount - current.amount) >= CHANGE_TOLERANCE;
     }
 
+    /** 手工充值仍供月度统计使用，但趋势精确校正只接收官方订单确认记录。 */
     private static RechargeSummary rechargeSummary(
             List<RechargeRecord> records, long startExclusive, long endInclusive
     ) {
         double amount = 0;
         int count = 0;
         for (RechargeRecord record : records) {
-            if (record.timestamp > startExclusive && record.timestamp <= endInclusive) {
+            if (record.officiallyConfirmed
+                    && record.timestamp > startExclusive && record.timestamp <= endInclusive) {
                 amount += record.amount;
                 count++;
             }
         }
         return new RechargeSummary(amount, count);
+    }
+
+    private static int hourOf(long timestamp) {
+        return Instant.ofEpochMilli(timestamp).atZone(SHANGHAI).getHour();
     }
 
     /** 使用确认窗口两端的 amount/surplus 比例平均，降低接口两位小数舍入波动。 */
@@ -210,6 +263,79 @@ public final class BalanceTrendCalculator {
         private RechargeSummary(double amount, int count) {
             this.amount = amount;
             this.count = count;
+        }
+    }
+
+    private static final class RateSample {
+        private final long timestamp;
+        private final int hour;
+        private final double rate;
+
+        private RateSample(long timestamp, int hour, double rate) {
+            this.timestamp = timestamp;
+            this.hour = hour;
+            this.rate = rate;
+        }
+    }
+
+    private static final class RateStats {
+        private int count;
+        private double sum;
+        private double squaredSum;
+        private double mean;
+
+        private void add(double value) {
+            count++;
+            sum += value;
+            squaredSum += value * value;
+            mean = sum / count;
+        }
+
+        private double standardDeviation() {
+            if (count < 2) return 0;
+            return Math.sqrt(Math.max(0, squaredSum / count - mean * mean));
+        }
+    }
+
+    private static final class RateHistory {
+        private final List<RateSample> samples = new ArrayList<>();
+
+        private void add(long timestamp, int hour, double rate) {
+            if (Double.isFinite(rate) && rate >= 0) {
+                samples.add(new RateSample(timestamp, hour, rate));
+            }
+        }
+
+        private int sizeSince(long since) {
+            int count = 0;
+            for (RateSample sample : samples) if (sample.timestamp >= since) count++;
+            return count;
+        }
+
+        private double meanForHour(int hour, long since) {
+            RateStats stats = statsForHour(hour, since);
+            return stats.count == 0 ? Double.NaN : stats.mean;
+        }
+
+        private double meanSince(long since) {
+            RateStats stats = statsSince(since);
+            return stats.count == 0 ? Double.NaN : stats.mean;
+        }
+
+        private RateStats statsForHour(int hour, long since) {
+            RateStats stats = new RateStats();
+            for (RateSample sample : samples) {
+                if (sample.timestamp >= since && sample.hour == hour) stats.add(sample.rate);
+            }
+            return stats;
+        }
+
+        private RateStats statsSince(long since) {
+            RateStats stats = new RateStats();
+            for (RateSample sample : samples) {
+                if (sample.timestamp >= since) stats.add(sample.rate);
+            }
+            return stats;
         }
     }
 }

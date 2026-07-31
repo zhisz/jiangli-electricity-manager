@@ -56,6 +56,8 @@ public final class AppUpdateManager {
     private final SharedPreferences preferences;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private boolean checkStarted;
+    /** 远程清单成功或失败后才允许处理本地 APK，防止旧缓存抢先弹出安装界面。 */
+    private boolean remoteCheckResolved;
     private boolean verificationInProgress;
     private boolean receiverRegistered;
     private boolean skipResumeAfterOptionalInstaller;
@@ -67,7 +69,9 @@ public final class AppUpdateManager {
         public void onReceive(Context context, Intent intent) {
             if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) return;
             long completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, NO_DOWNLOAD);
-            if (completedId == pendingDownloadId()) handlePendingDownload();
+            if (completedId == pendingDownloadId() && remoteCheckResolved) {
+                handlePendingDownload();
+            }
         }
     };
 
@@ -80,36 +84,42 @@ public final class AppUpdateManager {
     }
 
     /**
-     * 每次 MainActivity 实例只发起一次远程查询。没有配置 URL 或网络暂时失败时静默跳过，
-     * 避免版本服务故障妨碍电费查询；已经发现的强制下载仍由本地记录继续约束。
+     * 每次前台会话先查询远程最新清单，再处理本地缓存或已下载 APK。
+     *
+     * <p>旧实现会先展示缓存的强制版本。例如设备缓存了 1.2.0，而服务器已经发布
+     * 1.2.2，用户就会被迫先安装 1.2.0 再升级。现在远程清单拥有最高优先级；只有查询
+     * 失败时才回退到本地缓存，既能直接跨版本升级，也保留断网时的强制策略。</p>
      */
     public void checkOnLaunch() {
-        if (checkStarted || pendingDownloadId() != NO_DOWNLOAD) return;
+        if (checkStarted) return;
         checkStarted = true;
         UpdateInfo cachedMandatory = cachedMandatoryInfo();
-        if (cachedMandatory != null && cachedMandatory.versionCode > BuildConfig.VERSION_CODE) {
-            showUpdateDialog(cachedMandatory, true);
+        String manifestUrl = BuildConfig.UPDATE_MANIFEST_URL.trim();
+        if (manifestUrl.isEmpty()) {
+            remoteCheckResolved = true;
+            resumeCachedOrPending(cachedMandatory);
             return;
         }
-        String manifestUrl = BuildConfig.UPDATE_MANIFEST_URL.trim();
-        if (manifestUrl.isEmpty()) return;
 
         executor.execute(() -> {
             try {
                 UpdateInfo info = new AppUpdateClient().query(manifestUrl);
-                if (info == null || info.versionCode <= BuildConfig.VERSION_CODE) return;
-                boolean mandatory = info.isMandatoryFor(BuildConfig.VERSION_CODE);
-                if (!mandatory && skippedVersionCode() == info.versionCode) return;
-                if (mandatory) saveCachedMandatory(info);
-                runOnMain(() -> showUpdateDialog(info, mandatory));
+                runOnMain(() -> resolveRemoteInfo(info, cachedMandatory));
             } catch (IOException exception) {
                 // 启动检查不弹网络错误；断网不应影响用户查看余额和已有数据。
                 if (BuildConfig.DEBUG) Log.w(TAG, "启动更新检查失败", exception);
+                runOnMain(() -> {
+                    remoteCheckResolved = true;
+                    resumeCachedOrPending(cachedMandatory);
+                });
             }
         });
     }
 
-    /** Activity 恢复时接续上次尚未完成的下载或安装流程。 */
+    /**
+     * Activity 恢复时只清理已经满足的状态。未完成下载必须等本轮远程清单解析完毕后处理，
+     * 否则一个已经下载好的旧版本会在网络请求返回前抢先弹出系统安装器。
+     */
     public void onResume() {
         if (skipResumeAfterOptionalInstaller) {
             skipResumeAfterOptionalInstaller = false;
@@ -120,7 +130,50 @@ public final class AppUpdateManager {
             clearPendingDownload();
             return;
         }
-        if (pendingDownloadId() != NO_DOWNLOAD) handlePendingDownload();
+    }
+
+    private void resolveRemoteInfo(UpdateInfo info, UpdateInfo cachedMandatory) {
+        remoteCheckResolved = true;
+        if (info == null || info.versionCode <= BuildConfig.VERSION_CODE) {
+            // 清单明确没有更高版本时仍接续同版本的未完成安装；网络失败才使用旧强制缓存。
+            if (pendingDownloadId() != NO_DOWNLOAD) handlePendingDownload();
+            return;
+        }
+        boolean mandatory = info.isMandatoryFor(BuildConfig.VERSION_CODE);
+        if (mandatory) saveCachedMandatory(info);
+
+        int pendingCode = pendingVersionCode();
+        if (shouldReplacePending(pendingCode, info.versionCode)) {
+            discardPendingDownload();
+        } else if (pendingDownloadId() != NO_DOWNLOAD) {
+            // 本地任务已经是远程最新版，无需再次下载或显示第二个更新弹窗。
+            handlePendingDownload();
+            return;
+        }
+        if (!mandatory && skippedVersionCode() == info.versionCode) return;
+        new NotificationHelper(activity).appUpdate(info);
+        showUpdateDialog(info, mandatory);
+    }
+
+    private void resumeCachedOrPending(UpdateInfo cachedMandatory) {
+        if (cachedMandatory != null
+                && shouldReplacePending(
+                pendingVersionCode(), cachedMandatory.versionCode
+        )) {
+            // 即使当前离线，只要上一次已缓存了更高版本，也不能继续安装更旧的 APK。
+            discardPendingDownload();
+        }
+        if (pendingDownloadId() != NO_DOWNLOAD) {
+            handlePendingDownload();
+        } else if (cachedMandatory != null
+                && cachedMandatory.versionCode > BuildConfig.VERSION_CODE) {
+            showUpdateDialog(cachedMandatory, true);
+        }
+    }
+
+    /** 包内可见，便于 JVM 回归“跨多个版本必须直接替换旧下载”的判断。 */
+    static boolean shouldReplacePending(int pendingCode, int latestCode) {
+        return pendingCode > 0 && latestCode > pendingCode;
     }
 
     public void destroy() {
@@ -148,7 +201,7 @@ public final class AppUpdateManager {
                 .setMessage(message)
                 .setPositiveButton("立即更新", (dialog, which) -> beginDownload(info, mandatory));
         if (mandatory) {
-            builder.setNegativeButton("退出应用", (dialog, which) -> activity.finishAffinity());
+            builder.setNegativeButton("退出应用", (dialog, which) -> exitApplication());
         } else {
             builder.setNegativeButton("稍后", null)
                     .setNeutralButton("跳过此版本", (dialog, which) -> preferences.edit()
@@ -162,8 +215,12 @@ public final class AppUpdateManager {
 
     private void beginDownload(UpdateInfo info, boolean mandatory) {
         if (pendingDownloadId() != NO_DOWNLOAD) {
-            handlePendingDownload();
-            return;
+            if (shouldReplacePending(pendingVersionCode(), info.versionCode)) {
+                discardPendingDownload();
+            } else {
+                handlePendingDownload();
+                return;
+            }
         }
         try {
             Uri apkUri = Uri.parse(info.apkUrl);
@@ -284,7 +341,7 @@ public final class AppUpdateManager {
                 .setMessage("版本 " + pendingVersionName() + " 已完成下载和安全校验。")
                 .setPositiveButton("安装更新", (dialog, which) -> requestInstall(uri, mandatory));
         if (mandatory) {
-            builder.setNegativeButton("退出应用", (dialog, which) -> activity.finishAffinity());
+            builder.setNegativeButton("退出应用", (dialog, which) -> exitApplication());
         } else {
             builder.setNegativeButton("稍后", null);
         }
@@ -329,7 +386,7 @@ public final class AppUpdateManager {
                     }
                 });
         if (mandatory) {
-            builder.setNegativeButton("退出应用", (dialog, which) -> activity.finishAffinity());
+            builder.setNegativeButton("退出应用", (dialog, which) -> exitApplication());
         } else {
             builder.setNegativeButton("取消", null);
         }
@@ -344,7 +401,7 @@ public final class AppUpdateManager {
         blockingDialog = new AlertDialog.Builder(activity)
                 .setTitle("正在下载必要更新")
                 .setMessage("版本 " + versionName + " 正在后台下载，请稍候。")
-                .setNegativeButton("退出应用", (dialog, which) -> activity.finishAffinity())
+                .setNegativeButton("退出应用", (dialog, which) -> exitApplication())
                 .create();
         blockingDialog.setCancelable(false);
         blockingDialog.setCanceledOnTouchOutside(false);
@@ -371,7 +428,7 @@ public final class AppUpdateManager {
                 .setTitle("必要更新未完成")
                 .setMessage(message)
                 .setPositiveButton("重新下载", (ignored, which) -> beginDownload(info, true))
-                .setNegativeButton("退出应用", (ignored, which) -> activity.finishAffinity())
+                .setNegativeButton("退出应用", (ignored, which) -> exitApplication())
                 .create();
         dialog.setCancelable(false);
         dialog.setCanceledOnTouchOutside(false);
@@ -385,7 +442,7 @@ public final class AppUpdateManager {
         if (mandatory) {
             builder.setPositiveButton("重新尝试", (dialog, which) -> activity.getWindow()
                             .getDecorView().post(this::handlePendingDownload))
-                    .setNegativeButton("退出应用", (dialog, which) -> activity.finishAffinity());
+                    .setNegativeButton("退出应用", (dialog, which) -> exitApplication());
         } else {
             builder.setPositiveButton("知道了", null);
         }
@@ -428,6 +485,18 @@ public final class AppUpdateManager {
                 .remove(KEY_TARGET_MANDATORY)
                 .remove(KEY_TARGET_VERIFIED)
                 .apply();
+    }
+
+    /** 删除旧 DownloadManager 任务及其元数据，随后即可为远程最新版本创建全新任务。 */
+    private void discardPendingDownload() {
+        long id = pendingDownloadId();
+        if (id != NO_DOWNLOAD) downloadManager.remove(id);
+        clearPendingDownload();
+        dismissBlockingDialog();
+        if (readyDialog != null) {
+            readyDialog.dismiss();
+            readyDialog = null;
+        }
     }
 
     /**
@@ -474,6 +543,10 @@ public final class AppUpdateManager {
         return preferences.getLong(KEY_DOWNLOAD_ID, NO_DOWNLOAD);
     }
 
+    private int pendingVersionCode() {
+        return preferences.getInt(KEY_TARGET_CODE, 0);
+    }
+
     private int skippedVersionCode() {
         return preferences.getInt(KEY_SKIPPED_VERSION, 0);
     }
@@ -501,6 +574,15 @@ public final class AppUpdateManager {
             blockingDialog.dismiss();
             blockingDialog = null;
         }
+    }
+
+    /** 所有强制更新阶段统一从这里退出，确保重新启动时一定创建新的更新检查会话。 */
+    private void exitApplication() {
+        if (activity.getApplication() instanceof ElecApplication) {
+            ((ElecApplication) activity.getApplication())
+                    .endForegroundSessionForExplicitExit();
+        }
+        activity.finishAffinity();
     }
 
     private void runOnMain(Runnable action) {

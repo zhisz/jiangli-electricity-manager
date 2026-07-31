@@ -44,6 +44,11 @@ public final class ElectricityWorker extends Worker {
             new ReadingHistoryStore(context).record(
                     roomId, reading, repeatMode ? MODE_REPEAT : MODE_DAILY
             );
+            // 监测任务成功即表示当天真实使用了 App 服务；匿名心跳与房间数据完全隔离。
+            UsageReporter.reportMonitoringSucceeded(context);
+            // 后台整点监测也代表应用仍在使用。独立排队一次轻量更新检查，服务器不可用
+            // 时静默结束，绝不改变本次电费查询、历史写入和低余额提醒的成功结果。
+            UpdateNotificationWorker.enqueue(context);
 
             if (repeatMode) {
                 handleRepeatResult(context, roomId, config, state, notifications, reading);

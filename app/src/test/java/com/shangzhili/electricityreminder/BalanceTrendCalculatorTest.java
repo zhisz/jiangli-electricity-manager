@@ -168,6 +168,79 @@ public final class BalanceTrendCalculatorTest {
     }
 
     @Test
+    public void confirmedWindowUsesHistoricalSameHourWeightsAndKeepsExactTotal() {
+        LocalDate firstDay = LocalDate.of(2026, 7, 1);
+        long dayOneEight = firstDay.atTime(8, 0).atZone(ZONE)
+                .toInstant().toEpochMilli();
+        long dayTwoEight = firstDay.plusDays(1).atTime(8, 0).atZone(ZONE)
+                .toInstant().toEpochMilli();
+        List<HistoryPoint> readings = Arrays.asList(
+                // 第一天 8/9/10 时段分别确认消耗 1、3、2 度，成为历史权重。
+                new HistoryPoint(dayOneEight, 100, 100),
+                new HistoryPoint(dayOneEight + 3_600_000L, 99, 99),
+                new HistoryPoint(dayOneEight + 7_200_000L, 96, 96),
+                new HistoryPoint(dayOneEight + 10_800_000L, 94, 94),
+                // 次日 08:00 的小变化建立新确认窗口锚点。
+                new HistoryPoint(dayTwoEight, 93.9, 93.9),
+                new HistoryPoint(dayTwoEight + 3_600_000L, 93.9, 93.9),
+                new HistoryPoint(dayTwoEight + 7_200_000L, 93.9, 93.9),
+                new HistoryPoint(dayTwoEight + 10_800_000L, 87.9, 87.9)
+        );
+
+        List<BalanceTrendPoint> result =
+                BalanceTrendCalculator.calculate(readings, Collections.emptyList());
+
+        assertEquals(1, result.get(5).usageKwh, 0.0001);
+        assertEquals(3, result.get(6).usageKwh, 0.0001);
+        assertEquals(2, result.get(7).usageKwh, 0.0001);
+        assertEquals(6, result.get(5).usageKwh
+                + result.get(6).usageKwh + result.get(7).usageKwh, 0.0001);
+        assertEquals(87.9, result.get(7).displayedSurplus, 0.0001);
+    }
+
+    @Test
+    public void manualRechargeDoesNotMakeAnUpwardPlatformCorrectionPrecise() {
+        long start = 1_800_000_000_000L;
+        RechargeRecord manual = new RechargeRecord(
+                1, start + 1_800_000L, 30, ZONE, false
+        );
+        List<BalanceTrendPoint> result = BalanceTrendCalculator.calculate(
+                Arrays.asList(
+                        new HistoryPoint(start, 100, 100),
+                        new HistoryPoint(start + 3_600_000L, 120, 120)
+                ),
+                Collections.singletonList(manual)
+        );
+
+        assertTrue(result.get(1).unmatchedIncrease);
+        assertFalse(result.get(1).rateValid);
+        assertEquals(0, result.get(1).rechargeCount);
+    }
+
+    @Test
+    public void trailingPlateauForecastUsesConfirmedHistoricalRateAndHasConfidenceBand() {
+        long start = LocalDate.of(2026, 7, 1).atTime(8, 0).atZone(ZONE)
+                .toInstant().toEpochMilli();
+        List<HistoryPoint> readings = Arrays.asList(
+                new HistoryPoint(start, 100, 100),
+                new HistoryPoint(start + 3_600_000L, 98, 98),
+                new HistoryPoint(start + 7_200_000L, 96, 96),
+                new HistoryPoint(start + 10_800_000L, 94, 94),
+                new HistoryPoint(start + 14_400_000L, 94, 94)
+        );
+
+        BalanceTrendPoint tail = BalanceTrendCalculator.calculate(
+                readings, Collections.emptyList()
+        ).get(4);
+
+        assertTrue(tail.awaitingSourceUpdate);
+        assertTrue(tail.rateValid);
+        assertTrue(tail.displayedSurplus < tail.reading.surplus);
+        assertTrue(tail.confidenceLowSurplus <= tail.displayedSurplus);
+        assertTrue(tail.confidenceHighSurplus >= tail.displayedSurplus);
+    }
+
+    @Test
     public void dailyUsageAlsoSpreadsDelayedChangesAcrossConfirmedDays() {
         LocalDate day = LocalDate.of(2026, 7, 1);
         List<HistoryPoint> readings = Arrays.asList(

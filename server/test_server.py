@@ -63,6 +63,16 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(1, after_open["total_users"])
         self.assertEqual(1, after_open["today_active"])
 
+    def test_stale_heartbeat_updates_version_without_polluting_today_active(self):
+        device_digest = "b" * 64
+        self.store.record_heartbeat(
+            device_digest, 32, "1.0.0", event_day="2000-01-01", historical=True
+        )
+        stats = self.store.dashboard_stats(32)
+        self.assertEqual(1, stats["total_users"])
+        self.assertEqual(1, stats["latest_installed"])
+        self.assertEqual(0, stats["today_active"])
+
     def test_download_tracks_requests_and_unique_installations_separately(self):
         first = "6dbb4120-3748-4a8c-b5cf-cfa6f508f996"
         second = "49416366-ef0b-431f-8135-965ca036e212"

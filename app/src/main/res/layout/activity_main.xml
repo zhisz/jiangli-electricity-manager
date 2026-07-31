@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  详情页按“余额 → 图表 → 快捷功能 → 监测状态 → 设置”组织。
-  普通查看场景不会先遇到长表单；设置内容折叠时仍保留 Activity 中的输入状态。
+  详情页只保留“余额 → 图表 → 快捷功能”。房间级配置全部进入右上角独立设置页，
+  第一屏优先服务查看与刷新，不再出现长表单和重复状态卡。
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -45,6 +45,14 @@
                 android:textColor="@color/text_primary"
                 android:textSize="24sp"
                 android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/roomSettingsButton"
+                style="@style/Ui.Button.Text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="房间设置"
+                android:text="⚙" />
         </LinearLayout>
 
         <!-- 余额总览是第一视觉焦点；刷新缩成卡片内次操作，不再占据整行。 -->
@@ -109,20 +117,46 @@
                 android:textColor="@color/text_tertiary"
                 android:textSize="13sp" />
 
-            <TextView
-                android:id="@+id/balanceStateText"
-                android:layout_width="wrap_content"
+            <!-- 余额状态与监测状态彼此独立，文字在深浅主题和色觉差异下仍能表达含义。 -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_3"
-                android:background="@drawable/status_pill_neutral"
-                android:paddingStart="10dp"
-                android:paddingTop="5dp"
-                android:paddingEnd="10dp"
-                android:paddingBottom="5dp"
-                android:text="等待首次查询"
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/balanceStateText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/status_pill_neutral"
+                    android:paddingStart="10dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="5dp"
+                    android:text="等待首次查询"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/monitorStatePillText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_2"
+                    android:background="@drawable/status_pill_neutral"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:minHeight="32dp"
+                    android:paddingStart="10dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="5dp"
+                    android:text="未开启"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <!-- 电费充值仍由微信完成付款；这里保持次级按钮权重，不抢过余额主数据。 -->
             <Button
@@ -149,7 +183,7 @@
                 style="@style/Ui.Text.SectionTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="每日消耗 · 30 天" />
+                android:text="余额趋势 · 近 30 天电量" />
 
             <RadioGroup
                 android:id="@+id/chartModeGroup"
@@ -160,21 +194,21 @@
                 android:orientation="horizontal">
 
                 <RadioButton
-                    android:id="@+id/dailyUsageRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:checked="true"
-                    android:text="每日消耗" />
-
-                <RadioButton
                     android:id="@+id/balanceTrendRadio"
                     style="@style/Ui.SegmentButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:checked="true"
                     android:text="余额趋势" />
+
+                <RadioButton
+                    android:id="@+id/dailyUsageRadio"
+                    style="@style/Ui.SegmentButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="每日消耗" />
             </RadioGroup>
 
             <LinearLayout
@@ -182,7 +216,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone">
+                android:visibility="visible">
 
                 <RadioGroup
                     android:id="@+id/trendMetricGroup"
@@ -210,8 +244,8 @@
                 </RadioGroup>
 
                 <!--
-                  纵轴固定在屏幕左侧，时间内容独立横向滚动。最近 30 天最多约 720 个
-                  小时点，不会被压缩到一屏；初次展示由 Activity 自动定位到最右侧最新值。
+                  纵轴固定在屏幕左侧，时间内容独立横向滚动。内容总范围始终为 30 天，
+                  每个屏幕视口约展示 7 天；初次进入自动定位最右侧，向左滑查看更早数据。
                 -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -248,7 +282,7 @@
                     android:layout_marginTop="@dimen/space_1"
                     android:background="@drawable/status_background"
                     android:padding="@dimen/space_3"
-                    android:text="余额延迟刷新时会用虚线均摊已确认的累计消耗；细点线表示仍待数据源结算。点击时段可查看估算窗口，橙色竖线表示充值。"
+                    android:text="点击曲线查看对应时间的趋势余额"
                     android:textColor="?attr/uiPrimaryDark"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -257,7 +291,8 @@
                 android:id="@+id/dailyUsageContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:visibility="gone">
 
                 <RadioGroup
                     android:id="@+id/dailyUsageRangeGroup"
@@ -369,227 +404,5 @@
                 android:text="记录充值" />
         </LinearLayout>
 
-        <!-- 独立状态卡同时展示文字状态、全部时间和低余额复查间隔。 -->
-        <LinearLayout
-            android:id="@+id/monitorStatusCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding">
-
-            <TextView
-                style="@style/Ui.Text.SectionTitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="监测状态" />
-
-            <TextView
-                android:id="@+id/monitorStatusText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:text="等待首次查询"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/scheduleText"
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:text="保存设置后显示监测计划" />
-        </LinearLayout>
-
-        <!-- 房间码已在首页添加窗口确定，详情页只保留用户真正需要修改的备注。 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:labelFor="@id/aliasInput"
-                android:text="房间备注"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <EditText
-                    android:id="@+id/aliasInput"
-                    style="@style/Ui.EditText"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="例如：我的宿舍"
-                    android:inputType="text"
-                    android:maxLength="40"
-                    android:maxLines="1" />
-
-                <Button
-                    android:id="@+id/saveAliasButton"
-                    style="@style/Ui.Button.Text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_2"
-                    android:text="保存" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/reminderSettingsHeaderButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_2"
-            android:gravity="start|center_vertical"
-            android:text="提醒设置  ▾" />
-
-        <LinearLayout
-            android:id="@+id/reminderSettingsContent"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_2"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="判断指标"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold" />
-
-            <RadioGroup
-                android:id="@+id/metricGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:background="@drawable/segment_container_background"
-                android:orientation="horizontal">
-
-                <RadioButton
-                    android:id="@+id/amountRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:checked="true"
-                    android:text="按金额（元）" />
-
-                <RadioButton
-                    android:id="@+id/surplusRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="按电量（度）" />
-            </RadioGroup>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:labelFor="@id/thresholdInput"
-                android:text="提醒阈值"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold" />
-
-            <EditText
-                android:id="@+id/thresholdInput"
-                style="@style/Ui.EditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:hint="例如 20"
-                android:inputType="numberDecimal" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:labelFor="@id/recoveryInput"
-                android:text="恢复阈值"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold" />
-
-            <EditText
-                android:id="@+id/recoveryInput"
-                style="@style/Ui.EditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:hint="必须大于提醒阈值"
-                android:inputType="numberDecimal" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:labelFor="@id/repeatMinutesInput"
-                android:text="余额不足后的复查间隔（分钟）"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold" />
-
-            <EditText
-                android:id="@+id/repeatMinutesInput"
-                style="@style/Ui.EditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:hint="例如 60"
-                android:inputType="numberDecimal" />
-
-            <TextView
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_4"
-                android:background="@drawable/status_background"
-                android:padding="@dimen/space_3"
-                android:text="启用后默认在每天 00:00–23:00 的每个整点自动查询并记录，无需逐项设置时间。"
-                android:textColor="?attr/uiPrimaryDark"
-                android:textSize="13sp" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/saveButton"
-            style="@style/Ui.Button.Primary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_4"
-            android:text="保存并启用监测" />
-
-        <Button
-            android:id="@+id/cancelMonitoringButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_2"
-            android:text="取消整点监测" />
-
-        <Button
-            android:id="@+id/deleteButton"
-            style="@style/Ui.Button.DangerText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_6"
-            android:text="删除此房间" />
     </LinearLayout>
 </ScrollView>

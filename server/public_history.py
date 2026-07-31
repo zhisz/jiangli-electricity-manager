@@ -47,7 +47,9 @@ TARGET_BUILDINGS: dict[str, str] = {
 }
 ROOM_CODE_PATTERN = r"\d{15}"
 RETENTION_DAYS = 30
-DATA_VERSION = 1
+DATA_VERSION = 2
+LARGE_POSITIVE_CHANGE_KWH = 1_000.0
+LARGE_NEGATIVE_CHANGE_KWH = 100.0
 
 
 def shanghai_now() -> dt.datetime:
@@ -201,6 +203,19 @@ class PublicHistoryStore:
                 );
                 PRAGMA user_version = 1;
                 """
+            )
+            # 1.1.0 分类迁移：旧规则对正负变化统一使用 100 度阈值，导致一次约百元充值
+            # （常见可增加 150～200 度）被误标为待确认。只迁移方向明确且低于新正向上限的
+            # 既有事件；房间码、采样、变化量和任务逻辑均不改写。
+            connection.execute(
+                """
+                UPDATE change_events
+                SET inferred_type = '疑似充值或平台修正'
+                WHERE inferred_type = '待确认'
+                  AND delta_balance > 0
+                  AND delta_balance < ?
+                """,
+                (LARGE_POSITIVE_CHANGE_KWH,),
             )
 
     def metadata(self, key: str, fallback: str = "") -> str:
@@ -519,9 +534,16 @@ class PublicHistoryStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM samples
-                WHERE room_code = ? AND slot_time >= ? AND slot_time <= ? AND id > ?
-                ORDER BY id ASC LIMIT ?
+                SELECT s.*,
+                       ce.previous_query_time AS change_start_time,
+                       ce.current_query_time AS change_end_time,
+                       ce.delta_balance AS change_delta,
+                       ce.inferred_type AS change_type
+                FROM samples s
+                LEFT JOIN change_events ce ON ce.current_sample_id = s.id
+                WHERE s.room_code = ? AND s.slot_time >= ?
+                      AND s.slot_time <= ? AND s.id > ?
+                ORDER BY s.id ASC LIMIT ?
                 """,
                 (room_code, since, until, cursor, limit + 1),
             ).fetchall()
@@ -546,6 +568,11 @@ class PublicHistoryStore:
                     "queryResult": row["query_result"],
                     "errorType": row["error_type"],
                     "source": row["data_source"],
+                    # 变化时间只能表达“发生区间”，不能被客户端描述为准确充值时刻。
+                    "changeStartAt": row["change_start_time"],
+                    "changeEndAt": row["change_end_time"],
+                    "changeDeltaKwh": row["change_delta"],
+                    "changeType": row["change_type"],
                 }
             )
         return {
@@ -607,10 +634,13 @@ class PublicHistoryStore:
                 values,
             ).fetchall()
 
-            event_conditions = [
-                condition.replace("slot_time", "current_query_time")
-                for condition in conditions
-            ]
+            event_conditions: list[str] = []
+            if day:
+                event_conditions.append("substr(ce.current_query_time, 1, 10) = ?")
+            if building_code:
+                event_conditions.append("ce.building_code = ?")
+            if room_code:
+                event_conditions.append("ce.room_code = ?")
             event_where = (
                 " WHERE " + " AND ".join(event_conditions) if event_conditions else ""
             )
@@ -618,15 +648,23 @@ class PublicHistoryStore:
                 f"""
                 SELECT substr(current_query_time, 12, 2) AS hour,
                        inferred_type, COUNT(*) AS count
-                FROM change_events{event_where}
+                FROM change_events ce{event_where}
                 GROUP BY hour, inferred_type ORDER BY hour, inferred_type
                 """,
                 values,
             ).fetchall()
             recent_events = connection.execute(
                 f"""
-                SELECT * FROM change_events{event_where}
-                ORDER BY current_query_time DESC LIMIT 200
+                SELECT ce.*,
+                       COALESCE(NULLIF(s.floor_name, ''), NULLIF(r.floor_name, ''), '')
+                           AS floor_name,
+                       COALESCE(NULLIF(s.room_name, ''), NULLIF(r.room_name, ''), '')
+                           AS room_name
+                FROM change_events ce
+                LEFT JOIN samples s ON s.id = ce.current_sample_id
+                LEFT JOIN rooms r ON r.room_code = ce.room_code
+                {event_where}
+                ORDER BY ce.current_query_time DESC LIMIT 200
                 """,
                 values,
             ).fetchall()
@@ -647,10 +685,15 @@ class PublicHistoryStore:
 
 
 def infer_change_type(delta: float) -> str:
-    if abs(delta) >= 100:
-        return "待确认"
     if delta > 0:
+        # 正向变化最常见原因是充值。电价约为每度数角时，充值百元带来 100～200 多度
+        # 完全合理，不能沿用负向异常的 100 度阈值；极端大于 1000 度仍保守待确认。
+        if delta >= LARGE_POSITIVE_CHANGE_KWH:
+            return "待确认"
         return "疑似充值或平台修正"
+    # 一小时下降 100 度以上更可能是平台修正、表号变动或异常值，继续要求人工确认。
+    if abs(delta) >= LARGE_NEGATIVE_CHANGE_KWH:
+        return "待确认"
     return "用电消耗"
 
 

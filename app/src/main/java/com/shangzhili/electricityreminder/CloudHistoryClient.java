@@ -96,7 +96,11 @@ public final class CloudHistoryClient {
                         timestamp,
                         item.optDouble("balanceKwh", Double.NaN),
                         item.optDouble("amountYuan", Double.NaN),
-                        item.optString("queryResult", "")
+                        item.optString("queryResult", ""),
+                        parseOptionalTimestamp(item.optString("changeStartAt", "")),
+                        parseOptionalTimestamp(item.optString("changeEndAt", "")),
+                        item.optDouble("changeDeltaKwh", Double.NaN),
+                        item.optString("changeType", "")
                 );
                 // 服务端即使误返回其他房间，也不能跨房间写入本地历史。
                 if (expectedRoomCode.equals(roomCode) && record.isValidSuccess()) {
@@ -115,6 +119,11 @@ public final class CloudHistoryClient {
         } catch (RuntimeException exception) {
             return -1;
         }
+    }
+
+    private static long parseOptionalTimestamp(String value) {
+        if (value == null || value.trim().isEmpty() || "null".equals(value)) return 0;
+        return parseTimestamp(value);
     }
 
     private static String readAll(InputStream stream) throws IOException {

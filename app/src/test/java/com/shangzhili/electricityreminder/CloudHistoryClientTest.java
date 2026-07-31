@@ -6,6 +6,7 @@ import static org.junit.Assert.assertFalse;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -22,7 +23,11 @@ public final class CloudHistoryClientTest {
                 + "\"records\":["
                 + "{\"sampleKey\":\"valid\",\"roomCode\":\"" + ROOM + "\","
                 + "\"queriedAt\":\"2026-07-31T08:02:00+08:00\","
-                + "\"balanceKwh\":52.5,\"amountYuan\":31.5,\"queryResult\":\"success\"},"
+                + "\"balanceKwh\":52.5,\"amountYuan\":31.5,\"queryResult\":\"success\","
+                + "\"changeStartAt\":\"2026-07-31T07:02:00+08:00\","
+                + "\"changeEndAt\":\"2026-07-31T08:02:00+08:00\","
+                + "\"changeDeltaKwh\":30,"
+                + "\"changeType\":\"疑似充值或平台修正\"},"
                 + "{\"sampleKey\":\"failure\",\"roomCode\":\"" + ROOM + "\","
                 + "\"queriedAt\":\"2026-07-31T09:02:00+08:00\","
                 + "\"balanceKwh\":null,\"amountYuan\":null,\"queryResult\":\"failure\"},"
@@ -34,6 +39,13 @@ public final class CloudHistoryClientTest {
         assertEquals(1, result.size());
         assertEquals("valid", result.get(0).sampleKey);
         assertEquals(52.5, result.get(0).surplus, 0.0001);
+        assertEquals("疑似充值或平台修正", result.get(0).changeType);
+        assertEquals(30, result.get(0).changeDeltaKwh, 0.0001);
+        assertEquals(
+                OffsetDateTime.parse("2026-07-31T07:02:00+08:00")
+                        .toInstant().toEpochMilli(),
+                result.get(0).changeStartAt
+        );
     }
 
     @Test
