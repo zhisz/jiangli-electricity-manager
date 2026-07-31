@@ -1433,23 +1433,21 @@ def collector_page(
     return page_shell(
         "云端采集",
         f"""
-        <header class="topbar" id="page-top">
+        <header class="topbar collector-topbar" id="page-top">
           <div><div class="eyebrow">PUBLIC HISTORY</div><h1>云端采集</h1>
           <p class="muted">公共房间采样 · Asia/Shanghai · 最近 30 天</p></div>
           <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
         </header>
         <main class="collector-main">
           <div class="collector-workspace">
-            <div class="collector-left-column">
-              {collector_task_fragment(task)}
-              <section class="panel distribution-panel" id="distribution-section">
-                <div id="distribution-results">
-                  {collector_distribution_fragment(
-                      distribution, parameters["interval_end_hour"]
-                  )}
-                </div>
-              </section>
-            </div>
+            {collector_task_fragment(task)}
+            <section class="panel distribution-panel" id="distribution-section">
+              <div id="distribution-results">
+                {collector_distribution_fragment(
+                    distribution, parameters["interval_end_hour"]
+                )}
+              </div>
+            </section>
             <section class="panel events-panel" id="events-section">
             <div class="section-heading"><div><div class="eyebrow">CHANGE EVENTS</div>
               <h2>最近变化事件</h2><p class="muted">最近30天 · 分页查询</p></div></div>
@@ -1477,14 +1475,7 @@ def collector_page(
             </div>
             </section>
           </div>
-          <section class="data-note">
-            <strong>数据说明</strong>
-            <span>服务器只保留最近 30 天公共房间采样；数据库当前占用
-              {_format_bytes(int(task["database_bytes"]))}。用户备注、提醒和充值记录仍只保存在手机。</span>
-          </section>
-          <button class="back-to-top secondary" id="back-to-top" type="button">回到顶部</button>
         </main>
-        <footer>江理电费管家 · 云端公共采样控制台</footer>
         {_collector_script()}
         """,
     )
@@ -1512,11 +1503,9 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         f'<div class="stat-item"><span>{html.escape(label)}</span>'
         f'<strong>{html.escape(str(value))}</strong></div>'
         for label, value in (
-            ("当前轮数", f'{task["current_round"] or "—"} / {task["round_total"]}'),
-            ("样本总数", task["total_samples"]),
-            ("成功样本", success), ("失败样本", failure),
+            ("本轮应采", total), ("本轮已处理", processed),
+            ("本轮成功", success), ("本轮失败", failure),
             ("成功率", f"{success_rate:.2f}%"),
-            ("数据库占用", _format_bytes(int(task["database_bytes"]))),
             ("本轮耗时", duration),
         )
     )
@@ -1569,6 +1558,8 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         <div class="progress-track"><span style="width:{progress_percent:.2f}%"></span></div>
       </div>
       <div class="stats-strip">{statistics}</div>
+      <p class="task-storage-note">近30天累计 {task["total_samples"]} 条样本 · 数据库
+        {_format_bytes(int(task["database_bytes"]))}</p>
       <details class="expandable coverage-expand">
         <summary class="coverage-summary">
           <div><strong>已覆盖 {task["covered_buildings"]} 栋楼</strong>
@@ -1869,12 +1860,14 @@ def _collector_script() -> str:
       });
       bindDistributionControls();
       const backToTop = document.getElementById('back-to-top');
-      backToTop.addEventListener('click', () => {
-        document.getElementById('page-top').scrollIntoView({behavior:'smooth'});
-      });
-      window.addEventListener('scroll', () => {
-        backToTop.classList.toggle('visible', window.scrollY > 520);
-      }, {passive:true});
+      if (backToTop) {
+        backToTop.addEventListener('click', () => {
+          document.getElementById('page-top').scrollIntoView({behavior:'smooth'});
+        });
+        window.addEventListener('scroll', () => {
+          backToTop.classList.toggle('visible', window.scrollY > 520);
+        }, {passive:true});
+      }
     })();
     </script>
     """
@@ -1976,10 +1969,15 @@ def page_shell(title: str, content: str) -> str:
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
     .collector-metrics {{ grid-template-columns:repeat(6,1fr); margin-top:16px; }}
     .task-panel {{ border-top:3px solid var(--primary); }}
-    .collector-workspace {{ display:grid; grid-template-columns:minmax(0,1.35fr) minmax(380px,.85fr);
-      align-items:start; gap:16px; }}
-    .collector-left-column {{ display:grid; gap:16px; min-width:0; }}
-    .task-card {{ border-top:3px solid var(--primary); padding:24px; }}
+    .collector-main,.collector-topbar {{ width:min(1560px,calc(100% - 32px)); }}
+    .collector-topbar {{ min-height:68px; padding:10px 0; align-items:center; }}
+    .collector-topbar > div:first-child {{ display:flex; align-items:baseline; gap:16px; min-width:0; }}
+    .collector-topbar .eyebrow {{ display:none; }}
+    .collector-topbar h1 {{ flex:none; margin:0; font-size:25px; }}
+    .collector-topbar p {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .collector-workspace {{ display:grid; grid-template-columns:minmax(0,.78fr) minmax(0,1.28fr) minmax(0,.88fr);
+      align-items:stretch; gap:16px; height:calc(100vh - 68px); min-height:0; padding-bottom:12px; }}
+    .task-card {{ border-top:3px solid var(--primary); padding:20px; height:100%; overflow:auto; }}
     .task-head,.task-primary,.progress-summary > div:first-child,.coverage-summary,
     .failure-summary,.section-heading,.events-meta,.pagination,.date-nav {{
       display:flex; align-items:center; justify-content:space-between; gap:16px;
@@ -1988,21 +1986,23 @@ def page_shell(title: str, content: str) -> str:
     .status-label {{ border-radius:999px; padding:7px 11px; font-size:12px; font-weight:800; }}
     .status-ok {{ color:#16875b; background:#eaf8f1; }}
     .status-warning {{ color:#b45309; background:#fff4e5; }}
-    .task-primary {{ align-items:stretch; margin:22px 0 18px; }}
-    .round-display {{ min-width:250px; padding-right:24px; border-right:1px solid var(--border); }}
+    .task-primary {{ align-items:stretch; flex-direction:column; margin:18px 0 16px; }}
+    .round-display {{ min-width:0; padding:0 0 14px; border-right:0; border-bottom:1px solid var(--border); }}
     .round-display span,.task-meta span,.task-meta small {{ display:block; color:var(--muted); font-size:12px; }}
     .round-display strong {{ display:block; margin-top:7px; font-size:28px; }}
-    .task-meta {{ flex:1; }} .task-meta strong {{ display:block; margin:7px 0; }}
+    .task-meta {{ flex:1; padding-top:13px; }} .task-meta strong {{ display:block; margin:7px 0; }}
     .progress-summary {{ margin-bottom:18px; }}
     .progress-track,.mini-track {{ height:8px; background:var(--soft); border-radius:999px; overflow:hidden; }}
     .progress-track {{ margin-top:9px; }}
     .progress-track span,.mini-track span {{ display:block; height:100%; background:var(--primary); border-radius:inherit; }}
-    .stats-strip {{ display:grid; grid-template-columns:repeat(7,minmax(0,1fr));
+    .stats-strip {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
       border:1px solid var(--border); border-radius:12px; overflow:hidden; }}
     .stat-item {{ padding:13px 14px; min-width:0; border-right:1px solid var(--border); }}
-    .stat-item:last-child {{ border-right:0; }}
+    .stat-item:nth-child(even) {{ border-right:0; }}
+    .stat-item:nth-child(-n+4) {{ border-bottom:1px solid var(--border); }}
     .stat-item span {{ display:block; color:var(--muted); font-size:11px; margin-bottom:6px; }}
     .stat-item strong {{ display:block; font-size:17px; overflow-wrap:anywhere; }}
+    .task-storage-note {{ margin:10px 2px 0; color:var(--muted); font-size:11px; }}
     .coverage-summary {{ margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }}
     .coverage-summary span,.failure-summary span {{ display:block; margin-top:4px; color:var(--muted); font-size:12px; }}
     .compact-button {{ min-height:38px; padding:7px 12px; font-size:13px; }}
@@ -2021,9 +2021,9 @@ def page_shell(title: str, content: str) -> str:
     .failure-summary {{ margin-top:16px; padding:13px 14px; border-radius:10px;
       color:#9a4d08; background:#fff7e8; border:1px solid #f7d7a7; }}
     .failure-expand .expandable-content {{ overflow-x:auto; }}
-    .events-panel,.distribution-panel {{ padding:24px; min-width:0; }}
-    .events-panel {{ position:sticky; top:16px; height:calc(100vh - 32px); min-height:650px;
-      max-height:920px; display:flex; flex-direction:column; overflow:hidden; }}
+    .events-panel,.distribution-panel {{ padding:20px; min-width:0; height:100%; overflow:hidden; }}
+    .events-panel {{ display:flex; flex-direction:column; }}
+    .distribution-panel > #distribution-results {{ height:100%; overflow-y:auto; padding-right:2px; }}
     .section-heading {{ align-items:flex-start; margin-bottom:18px; }}
     .event-filter-drawer {{ margin-bottom:12px; border:1px solid var(--border); border-radius:10px; }}
     .event-filter-drawer > summary {{ cursor:pointer; list-style:none; padding:11px 13px;
@@ -2057,16 +2057,16 @@ def page_shell(title: str, content: str) -> str:
     .is-loading {{ opacity:.48; pointer-events:none; transition:opacity .15s ease; }}
     .empty-state {{ padding:32px 12px; text-align:center; color:var(--muted); }}
     .error-state {{ color:var(--danger); }}
-    .distribution-heading {{ align-items:center; }}
-    .date-nav {{ flex-wrap:wrap; justify-content:flex-end; gap:7px; }}
+    .distribution-heading {{ display:grid; grid-template-columns:1fr; align-items:start; gap:10px; margin-bottom:12px; }}
+    .date-nav {{ flex-wrap:nowrap; justify-content:flex-start; gap:7px; }}
     .date-nav input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
-    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:10px 22px; padding:12px 14px;
-      border:1px solid var(--border); border-radius:12px; margin-bottom:14px; color:var(--muted); }}
+    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:8px 20px; padding:10px 12px;
+      border:1px solid var(--border); border-radius:12px; margin-bottom:8px; color:var(--muted); }}
     .distribution-summary strong {{ color:var(--text); margin-right:4px; }}
-    .interval-list {{ display:grid; gap:4px; }}
+    .interval-list {{ display:grid; gap:2px; }}
     .interval-card {{ display:grid; grid-template-columns:112px minmax(80px,1fr) 176px; align-items:center;
-      gap:12px; min-height:44px; padding:8px 10px; text-align:left; background:var(--surface); color:var(--text);
+      gap:12px; min-height:32px; padding:5px 10px; text-align:left; background:var(--surface); color:var(--text);
       border:1px solid transparent; border-radius:9px; font-weight:400; }}
     .interval-card:hover,.interval-card.selected {{ border-color:var(--primary); background:var(--soft); }}
     .interval-card.has-abnormal {{ border-color:#d97706; }}
@@ -2078,9 +2078,6 @@ def page_shell(title: str, content: str) -> str:
     .interval-counts {{ display:flex; align-items:center; justify-content:flex-end; gap:9px;
       color:var(--muted); font-size:11px; white-space:nowrap; }}
     .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:15px; }}
-    .data-note {{ display:flex; gap:12px; align-items:flex-start; padding:5px 4px;
-      color:var(--muted); font-size:12px; line-height:1.6; }}
-    .data-note strong {{ color:var(--text); white-space:nowrap; }}
     .back-to-top {{ position:fixed; right:18px; bottom:18px; z-index:5; box-shadow:0 4px 16px #17223b18;
       opacity:0; pointer-events:none; transform:translateY(8px); transition:opacity .18s ease,transform .18s ease; }}
     .back-to-top.visible {{ opacity:1; pointer-events:auto; transform:translateY(0); }}
@@ -2088,28 +2085,25 @@ def page_shell(title: str, content: str) -> str:
       background:#fdecec; color:var(--danger); }}
     .notice {{ margin-top:16px; padding:12px; border-radius:10px;
       background:var(--soft); color:var(--primary); }}
-    @media(max-width:1100px) {{
-      .collector-workspace {{ grid-template-columns:1fr; }}
-      .events-panel {{ position:static; height:720px; max-height:none; }}
-    }}
     @media(max-width:920px) {{
+      .collector-workspace {{ grid-template-columns:1fr; }}
+      .collector-workspace {{ height:auto; min-height:0; }}
+      .task-card,.distribution-panel {{ height:auto; overflow:visible; }}
+      .events-panel {{ height:720px; }}
       .metric-grid {{ grid-template-columns:repeat(3,1fr); }}
       .two-column {{ grid-template-columns:1fr; }}
       .collector-metrics {{ grid-template-columns:repeat(3,1fr); }}
-      .stats-strip {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
-      .stat-item {{ border-bottom:1px solid var(--border); }}
       .interval-card {{ grid-template-columns:108px minmax(70px,1fr) 160px; }}
     }}
     @media(max-width:560px) {{
       .topbar {{ align-items:flex-start; flex-direction:column; padding-top:28px; }}
+      .collector-topbar > div:first-child {{ display:block; }}
+      .collector-topbar p {{ margin-top:5px; white-space:normal; }}
       .metric-grid {{ grid-template-columns:repeat(2,1fr); }}
       dl {{ grid-template-columns:1fr; gap:4px; }} dd {{ margin-bottom:10px; }}
       .task-card,.events-panel,.distribution-panel {{ padding:18px; }}
-      .task-primary,.coverage-summary,.failure-summary,.section-heading {{ align-items:flex-start; flex-direction:column; }}
+      .coverage-summary,.failure-summary,.section-heading {{ align-items:flex-start; flex-direction:column; }}
       .summary-action {{ width:100%; }}
-      .round-display {{ min-width:0; width:100%; padding:0 0 14px; border-right:0; border-bottom:1px solid var(--border); }}
-      .stats-strip {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
-      .stat-item:nth-child(even) {{ border-right:0; }}
       .event-filters label,.event-filters label:nth-child(5) {{ min-width:0; }}
       .event-filters label:nth-child(3),.event-filters label:nth-child(5) {{ grid-column:1/-1; }}
       .event-filters button {{ width:100%; justify-content:center; }}
@@ -2121,8 +2115,6 @@ def page_shell(title: str, content: str) -> str:
       .interval-counts {{ grid-column:2; grid-row:1; }}
       .event-row-values {{ flex-wrap:wrap; }}
       .events-panel {{ height:680px; }}
-      .data-note {{ flex-direction:column; }}
-      .back-to-top {{ right:12px; bottom:12px; }}
     }}
     @media(prefers-color-scheme:dark) {{
       :root {{ --bg:#10131a; --surface:#181d27; --text:#f1f4f8; --muted:#b0bac9;
