@@ -1366,7 +1366,8 @@ def collector_page(
             ("time_asc", "时间：最早优先"),
             ("building_asc", "楼栋：正序"),
             ("building_desc", "楼栋：倒序"),
-            ("amount_desc", "金额变化：由大到小"),
+            ("recharge_amount_desc", "充值金额：由高到低（仅充值）"),
+            ("consumption_amount_desc", "消耗金额：由高到低（仅消耗）"),
             ("balance_desc", "电量变化：由大到小"),
         )
     )
@@ -1426,7 +1427,9 @@ def collector_page(
               <span class="pill">{html.escape(dict(
                   time_desc="最新优先", time_asc="最早优先",
                   building_asc="楼栋正序", building_desc="楼栋倒序",
-                  amount_desc="金额降序", balance_desc="电量降序"
+                  recharge_amount_desc="充值金额降序",
+                  consumption_amount_desc="消耗金额降序",
+                  balance_desc="电量降序"
               ).get(event_sort, "最新优先"))}</span></div>
             <div class="table-wrap"><table class="event-table"><thead><tr><th>房间</th>
               <th>采集区间</th><th>余额</th><th>电量变化</th><th>金额变化</th><th>类型</th></tr></thead>

@@ -91,16 +91,35 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertAlmostEqual(-1.5, row[2])
         self.assertEqual("用电消耗", row[3])
 
+        self.store.record_sample(
+            "2026-07-31T10:00:00+08:00",
+            self.room,
+            history.QueryResult(True, 100.0, 60.0),
+        )
+
         # 后台展示从当前样本/房间目录补齐可读名称，筛选关联仍然只使用稳定 roomCode。
-        overview = self.store.collector_overview(event_sort="amount_desc")
+        overview = self.store.collector_overview(event_sort="time_desc")
         event = overview["events"][0]
         self.assertEqual("第一公寓", event["building_name"])
         self.assertEqual("1楼", event["floor_name"])
         self.assertEqual("101", event["room_name"])
         self.assertEqual(self.room.room_code, event["room_code"])
-        self.assertAlmostEqual(-0.9, event["delta_amount"])
         self.assertEqual("08", overview["distribution"][0]["start_hour"])
         self.assertEqual("09", overview["distribution"][0]["end_hour"])
+
+        # 充值金额与消耗金额属于相反方向，后台必须分别筛选后再排序，不能按绝对值混排。
+        recharge_events = self.store.collector_overview(
+            event_sort="recharge_amount_desc"
+        )["events"]
+        consumption_events = self.store.collector_overview(
+            event_sort="consumption_amount_desc"
+        )["events"]
+        self.assertEqual(1, len(recharge_events))
+        self.assertEqual("充值", recharge_events[0]["inferred_type"])
+        self.assertAlmostEqual(12.9, recharge_events[0]["delta_amount"])
+        self.assertEqual(1, len(consumption_events))
+        self.assertEqual("用电消耗", consumption_events[0]["inferred_type"])
+        self.assertAlmostEqual(-0.9, consumption_events[0]["delta_amount"])
 
         # 每个前端排序值都必须走服务端白名单；未知值安全回退为按最新时间排序。
         for event_sort in history.EVENT_SORT_SQL:

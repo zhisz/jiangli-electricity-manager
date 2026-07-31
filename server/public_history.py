@@ -65,7 +65,11 @@ EVENT_SORT_SQL = {
         "ce.building_code DESC, floor_name DESC, room_name DESC, "
         "ce.current_query_time DESC"
     ),
-    "amount_desc": (
+    "recharge_amount_desc": (
+        "COALESCE(s.amount_yuan - ps.amount_yuan, 0) DESC, "
+        "ce.current_query_time DESC"
+    ),
+    "consumption_amount_desc": (
         "ABS(COALESCE(s.amount_yuan - ps.amount_yuan, 0)) DESC, "
         "ce.current_query_time DESC"
     ),
@@ -678,6 +682,16 @@ class PublicHistoryStore:
                 values,
             ).fetchall()
             order_sql = EVENT_SORT_SQL.get(event_sort, EVENT_SORT_SQL["time_desc"])
+            # 金额本身有两个相反的业务方向：余额折算金额增加代表充值，减少代表消耗。
+            # 两者若按绝对值混排会让“金额最大”失去含义，因此两个金额选项同时限定
+            # 事件类型；时间、楼栋和电量排序仍展示全部事件。
+            recent_where = event_where
+            if event_sort == "recharge_amount_desc":
+                recent_where += (" AND " if recent_where else " WHERE ")
+                recent_where += "ce.inferred_type = '充值'"
+            elif event_sort == "consumption_amount_desc":
+                recent_where += (" AND " if recent_where else " WHERE ")
+                recent_where += "ce.inferred_type = '用电消耗'"
             recent_events = connection.execute(
                 f"""
                 SELECT ce.*,
@@ -692,7 +706,7 @@ class PublicHistoryStore:
                 LEFT JOIN samples s ON s.id = ce.current_sample_id
                 LEFT JOIN samples ps ON ps.id = ce.previous_sample_id
                 LEFT JOIN rooms r ON r.room_code = ce.room_code
-                {event_where}
+                {recent_where}
                 ORDER BY {order_sql} LIMIT 200
                 """,
                 values,
