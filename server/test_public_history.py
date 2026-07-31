@@ -91,12 +91,19 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertAlmostEqual(-1.5, row[2])
         self.assertEqual("用电消耗", row[3])
 
+        # 后台展示从当前样本/房间目录补齐可读名称，筛选关联仍然只使用稳定 roomCode。
+        event = self.store.collector_overview()["events"][0]
+        self.assertEqual("第一公寓", event["building_name"])
+        self.assertEqual("1楼", event["floor_name"])
+        self.assertEqual("101", event["room_name"])
+        self.assertEqual(self.room.room_code, event["room_code"])
+
     def test_public_history_paginates_and_never_returns_credentials(self):
         for hour in (8, 9, 10):
             self.store.record_sample(
                 f"2026-07-31T{hour:02d}:00:00+08:00",
                 self.room,
-                history.QueryResult(True, 90.0 - hour, 50.0 - hour),
+                history.QueryResult(True, 90.0 + hour, 50.0 + hour),
             )
         first = self.store.public_history(
             self.room.room_code,
@@ -115,6 +122,14 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertTrue(first["hasMore"])
         self.assertFalse(second["hasMore"])
         self.assertEqual(3, len(first["records"]) + len(second["records"]))
+        combined = first["records"] + second["records"]
+        positive_events = [
+            item for item in combined
+            if item.get("changeType") == "疑似充值或平台修正"
+        ]
+        self.assertTrue(positive_events)
+        self.assertTrue(positive_events[0]["changeStartAt"])
+        self.assertGreater(positive_events[0]["changeDeltaKwh"], 0)
         serialized = json.dumps(first, ensure_ascii=False).lower()
         self.assertNotIn("cookie", serialized)
         self.assertNotIn("shiro", serialized)
@@ -174,7 +189,9 @@ class DirectoryScopeTests(unittest.TestCase):
     def test_change_type_labels_are_conservative(self):
         self.assertEqual("用电消耗", history.infer_change_type(-1))
         self.assertEqual("疑似充值或平台修正", history.infer_change_type(20))
-        self.assertEqual("待确认", history.infer_change_type(100))
+        self.assertEqual("疑似充值或平台修正", history.infer_change_type(192.15))
+        self.assertEqual("待确认", history.infer_change_type(1_000))
+        self.assertEqual("待确认", history.infer_change_type(-100))
 
     def test_negative_balance_is_valid_arrears(self):
         client = object.__new__(history.XiaofubaoClient)

@@ -14,6 +14,7 @@ import java.util.Locale;
 public final class NotificationHelper {
     /** MainActivity 用这个 ID 直接打开本渠道的系统设置页。 */
     public static final String ALERT_CHANNEL = "electricity_alerts";
+    public static final String UPDATE_CHANNEL = "app_updates";
     private final Context context;
     private final NotificationManager manager;
 
@@ -98,13 +99,37 @@ public final class NotificationHelper {
         );
     }
 
+    /**
+     * 新版本用独立低打扰渠道发系统通知。每个 versionCode 只通知一次；更新弹窗仍由
+     * MainActivity 按强制/可选策略处理，点击通知只负责把应用带回前台。
+     */
+    public void appUpdate(UpdateInfo info) {
+        if (info == null || info.versionCode <= BuildConfig.VERSION_CODE) return;
+        android.content.SharedPreferences preferences = context.getSharedPreferences(
+                "app_update_notification", Context.MODE_PRIVATE
+        );
+        if (preferences.getInt("notifiedVersionCode", 0) >= info.versionCode) return;
+        String body = info.isMandatoryFor(BuildConfig.VERSION_CODE)
+                ? "版本 " + info.versionName + " 必须更新，点击打开应用并下载安装。"
+                : "版本 " + info.versionName + " 已发布，点击打开应用查看更新内容。";
+        if (show(9_001, null, "江理电费管家有新版本", body, UPDATE_CHANNEL)) {
+            preferences.edit().putInt("notifiedVersionCode", info.versionCode).apply();
+        }
+    }
+
     private void show(int id, String roomId, String title, String body) {
+        show(id, roomId, title, body, ALERT_CHANNEL);
+    }
+
+    private boolean show(
+            int id, String roomId, String title, String body, String channelId
+    ) {
         // Android 13 起，未授予 POST_NOTIFICATIONS 时直接结束。这样后台查询仍会被记录，
         // 但不会因通知权限被拒绝而把一次成功查询错误地记成监测失败。
         if (Build.VERSION.SDK_INT >= 33
                 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
-            return;
+            return false;
         }
         Intent intent = roomId == null
                 ? new Intent(context, MainActivity.class)
@@ -113,7 +138,7 @@ public final class NotificationHelper {
                 context, id, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
-        android.app.Notification notification = new android.app.Notification.Builder(context, ALERT_CHANNEL)
+        android.app.Notification notification = new android.app.Notification.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(body)
@@ -122,6 +147,7 @@ public final class NotificationHelper {
                 .setAutoCancel(true)
                 .build();
         manager.notify(id, notification);
+        return true;
     }
 
     /** 不同房间使用不同通知 ID，某个房间的重复通知只更新自己的那一条。 */
@@ -136,5 +162,10 @@ public final class NotificationHelper {
         );
         channel.setDescription("低余额、充值结果、登录失效和监测故障提醒");
         manager.createNotificationChannel(channel);
+        NotificationChannel updates = new NotificationChannel(
+                UPDATE_CHANNEL, "应用更新", NotificationManager.IMPORTANCE_DEFAULT
+        );
+        updates.setDescription("新版本发布与必须更新提醒");
+        manager.createNotificationChannel(updates);
     }
 }

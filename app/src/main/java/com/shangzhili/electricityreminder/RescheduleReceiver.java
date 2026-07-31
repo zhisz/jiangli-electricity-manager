@@ -24,5 +24,7 @@ public final class RescheduleReceiver extends BroadcastReceiver {
             return;
         }
         Scheduler.restoreAllConfigured(context);
+        // 应用升级、重启或系统时间变化后再次确保唯一周期任务存在；不会重复创建。
+        UpdateNotificationWorker.schedulePeriodic(context);
     }
 }

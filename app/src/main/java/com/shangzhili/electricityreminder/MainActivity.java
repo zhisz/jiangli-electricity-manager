@@ -36,7 +36,7 @@ public final class MainActivity extends Activity {
     private TextView reorderHintText;
     private Button systemSettingsButton;
     private SetupPreferences setupPreferences;
-    private AppUpdateManager appUpdateManager;
+    private AlertDialog firstUseGuide;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,10 +46,6 @@ public final class MainActivity extends Activity {
         applySystemBarInsets();
         repository = new RoomRepository(this);
         setupPreferences = new SetupPreferences(this);
-        appUpdateManager = new AppUpdateManager(this);
-        // 匿名统计是“尽力而为”的独立网络请求：每天至多成功一次，服务器不可用时静默失败。
-        // 它不参与房间加载、更新检查或提醒调度，因此不会成为任何现有功能的前置条件。
-        UsageReporter.reportAppOpened(this);
         // 设置检查依赖通知渠道是否存在，因此首页启动时先创建渠道，再读取系统状态。
         new NotificationHelper(this);
         // 首次升级完成旧配置迁移后，立即为迁移出的房间建立带 roomId 的新闹钟。
@@ -64,7 +60,7 @@ public final class MainActivity extends Activity {
 
         findViewById(R.id.addRoomButton).setOnClickListener(view ->
                 new AddRoomDialog(this, repository, roomId ->
-                        startActivity(RoomDetailActivity.createIntent(this, roomId))
+                        showMonitoringGuideForNewRoom(roomId)
                 ).show()
         );
 
@@ -81,8 +77,32 @@ public final class MainActivity extends Activity {
         }
         renderRooms();
         refreshSystemSettingsStatus();
-        // 如果更新下载跨越了进程重启或安装权限页面，在回到首页时继续处理。
-        appUpdateManager.onResume();
+    }
+
+    /**
+     * 只在 AddRoomDialog 首次创建成功的回调中显示，因此刷新、改备注和重新进入详情都不会
+     * 重复打扰。选择“暂不开启”时配置已完整保存，实时查询、云端历史和图表均不受影响。
+     */
+    private void showMonitoringGuideForNewRoom(String roomId) {
+        renderRooms();
+        new AlertDialog.Builder(this)
+                .setTitle("房间已添加")
+                .setMessage("是否现在开启余额监测与低余额提醒？")
+                .setCancelable(false)
+                .setNegativeButton("暂不开启", (dialog, which) ->
+                        startActivity(RoomDetailActivity.createIntent(this, roomId))
+                )
+                .setPositiveButton("现在设置", (dialog, which) -> {
+                    /*
+                     * 一次性建立“首页 → 详情 → 设置”的返回栈。设置页无论是否保存，按返回键
+                     * 都只会回到刚添加房间的详情，而不是越过详情直接回首页。
+                     */
+                    startActivities(new Intent[]{
+                            RoomDetailActivity.createIntent(this, roomId),
+                            RoomSettingsActivity.createIntent(this, roomId)
+                    });
+                })
+                .show();
     }
 
     /**
@@ -100,12 +120,11 @@ public final class MainActivity extends Activity {
 
     private void showFirstUseGuideIfNeeded() {
         if (setupPreferences.hasShownOnboarding()) {
-            appUpdateManager.checkOnLaunch();
             return;
         }
         // 先记录“已展示”，避免旋转屏幕或系统重建 Activity 时连续弹出多个对话框。
         setupPreferences.markOnboardingShown();
-        AlertDialog guide = new AlertDialog.Builder(this)
+        firstUseGuide = new AlertDialog.Builder(this)
                 .setTitle("首次使用设置")
                 .setMessage("为了在 App 退出后仍能按时提醒，需要检查通知权限、精确闹钟、"
                         + "电池优化和厂商自启动。\n\n"
@@ -113,15 +132,15 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("稍后", null)
                 .setPositiveButton("检查并设置", (dialog, which) -> openSystemSettings())
                 .create();
-        // 首次引导关闭后再查询版本，避免两个重要弹窗互相覆盖。
-        guide.setOnDismissListener(dialog -> appUpdateManager.checkOnLaunch());
-        guide.show();
+        firstUseGuide.setOnDismissListener(dialog -> {
+            firstUseGuide = null;
+            ((ElecApplication) getApplication()).requestUpdateWhenSafe(this);
+        });
+        firstUseGuide.show();
     }
 
-    @Override
-    protected void onDestroy() {
-        if (appUpdateManager != null) appUpdateManager.destroy();
-        super.onDestroy();
+    boolean isFirstUseGuideShowing() {
+        return firstUseGuide != null && firstUseGuide.isShowing();
     }
 
     private void openSystemSettings() {

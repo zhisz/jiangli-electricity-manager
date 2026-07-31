@@ -39,6 +39,7 @@ public final class UsageReporter {
     private static final String KEY_INSTALLATION_ID = "installationId";
     private static final String KEY_LAST_SUCCESSFUL_DAY = "lastSuccessfulDay";
     private static final String KEY_LAST_SUCCESSFUL_VERSION = "lastSuccessfulVersionCode";
+    private static final String KEY_PENDING_DAY = "pendingDay";
     private static final int CONNECT_TIMEOUT_MILLIS = 2_000;
     private static final int READ_TIMEOUT_MILLIS = 3_000;
 
@@ -97,6 +98,23 @@ public final class UsageReporter {
      * App 时仍有一次自然补报机会，但单次打开不会连续重试消耗流量。
      */
     public static void reportAppOpened(Context context) {
+        reportForeground(context);
+    }
+
+    /**
+     * 每次应用真正进入前台时调用。相同上海自然日成功过就不再联网；失败日期会保存在本地，
+     * 后续前台会话有限补发。服务端不会把过期补发计入“今天”，因此断网恢复不会污染日活。
+     */
+    public static void reportForeground(Context context) {
+        report(context, "foreground");
+    }
+
+    /** 后台整点监测成功也代表当天真实使用了 App 能力，按同一设备、同一天幂等计入日活。 */
+    public static void reportMonitoringSucceeded(Context context) {
+        report(context, "monitor");
+    }
+
+    private static void report(Context context, String source) {
         String baseUrl = BuildConfig.ELEC_SERVICE_BASE_URL.trim();
         if (baseUrl.isEmpty()) return;
 
@@ -110,14 +128,24 @@ public final class UsageReporter {
         if (today.equals(preferences.getString(KEY_LAST_SUCCESSFUL_DAY, ""))
                 && lastVersion == BuildConfig.VERSION_CODE) return;
         if (!REPORT_IN_PROGRESS.compareAndSet(false, true)) return;
+        String pendingDay = preferences.getString(KEY_PENDING_DAY, "");
+        String reportingDay = pendingDay == null || pendingDay.isEmpty() ? today : pendingDay;
+        if (pendingDay == null || pendingDay.isEmpty()) {
+            preferences.edit().putString(KEY_PENDING_DAY, today).apply();
+        }
 
         EXECUTOR.execute(() -> {
             HttpURLConnection connection = null;
+            boolean sendCurrentDayNext = false;
             try {
                 JSONObject body = new JSONObject()
                         .put("installId", deviceIdentity(appContext))
                         .put("versionCode", BuildConfig.VERSION_CODE)
-                        .put("versionName", BuildConfig.VERSION_NAME);
+                        .put("versionName", BuildConfig.VERSION_NAME)
+                        // eventDay 只用于让服务器识别过期补发；最终计数日期仍由服务器上海时间决定。
+                        .put("eventDay", reportingDay)
+                        .put("historical", !today.equals(reportingDay))
+                        .put("source", source);
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
 
                 URL endpoint = new URL(withoutTrailingSlash(baseUrl) + "/api/v1/heartbeat");
@@ -134,10 +162,17 @@ public final class UsageReporter {
 
                 int status = connection.getResponseCode();
                 if (status >= 200 && status < 300) {
-                    preferences.edit()
-                            .putString(KEY_LAST_SUCCESSFUL_DAY, today)
-                            .putInt(KEY_LAST_SUCCESSFUL_VERSION, BuildConfig.VERSION_CODE)
-                            .apply();
+                    if (today.equals(reportingDay)) {
+                        preferences.edit()
+                                .putString(KEY_LAST_SUCCESSFUL_DAY, today)
+                                .putInt(KEY_LAST_SUCCESSFUL_VERSION, BuildConfig.VERSION_CODE)
+                                .remove(KEY_PENDING_DAY)
+                                .apply();
+                    } else {
+                        // 先把旧事件交给服务器判定为过期且不计入今天，再发送本次真实前台事件。
+                        preferences.edit().remove(KEY_PENDING_DAY).apply();
+                        sendCurrentDayNext = true;
+                    }
                 } else if (BuildConfig.DEBUG) {
                     Log.w(TAG, "匿名启动统计返回非成功状态：" + status);
                 }
@@ -147,6 +182,7 @@ public final class UsageReporter {
             } finally {
                 if (connection != null) connection.disconnect();
                 REPORT_IN_PROGRESS.set(false);
+                if (sendCurrentDayNext) report(appContext, source);
             }
         });
     }

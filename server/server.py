@@ -227,7 +227,12 @@ class AnalyticsStore:
             )
 
     def record_heartbeat(
-        self, install_id: str, version_code: int, version_name: str
+        self,
+        install_id: str,
+        version_code: int,
+        version_name: str,
+        event_day: str = "",
+        historical: bool = False,
     ) -> None:
         install_hash = hash_identity(
             self.telemetry_key, "installation", install_id.lower()
@@ -248,6 +253,11 @@ class AnalyticsStore:
                 """,
                 (install_hash, now, now, version_code, version_name),
             )
+            # eventDay 是辅助审计字段，绝不用于决定服务器的统计日期。只有客户端明确标记
+            # 为本地失败队列中的历史补发时才跳过今日 DAU；正常心跳始终使用服务器上海日，
+            # 因而用户修改手机日期也不会造成重复或漏计。
+            if historical:
+                return
             connection.execute(
                 """
                 INSERT INTO daily_active(day, install_hash, version_code, last_seen)
@@ -708,14 +718,20 @@ class Handler(BaseHTTPRequestHandler):
             install_id = str(payload.get("installId", "")).strip()
             version_code = int(payload.get("versionCode", 0))
             version_name = str(payload.get("versionName", "")).strip()[:40]
+            event_day = str(payload.get("eventDay", "")).strip()
+            historical = payload.get("historical", False)
+            source = str(payload.get("source", "foreground")).strip()
             if (
                 not IDENTITY_PATTERN.fullmatch(install_id)
                 or version_code <= 0
                 or not version_name
+                or (event_day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_day))
+                or not isinstance(historical, bool)
+                or source not in {"foreground", "monitor"}
             ):
                 raise ValueError("invalid heartbeat")
             self.service.store.record_heartbeat(
-                install_id, version_code, version_name
+                install_id, version_code, version_name, event_day, historical
             )
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", None)
         except (ValueError, json.JSONDecodeError):
@@ -1309,8 +1325,14 @@ def collector_page(
     event_rows = "".join(
         f"""
         <tr>
-          <td>{html.escape(str(row["building_name"]))}</td>
-          <td class="mono">{html.escape(str(row["room_code"]))}</td>
+          <td colspan="2"><strong>{html.escape(
+              " · ".join(part for part in (
+                  str(row.get("building_name") or ""),
+                  str(row.get("floor_name") or ""),
+                  str(row.get("room_name") or ""),
+              ) if part) or str(row["room_code"])
+          )}</strong><br>
+          <span class="muted mono" title="房间码">{html.escape(str(row["room_code"]))}</span></td>
           <td>{html.escape(str(row["previous_query_time"]))}<br>至<br>
               {html.escape(str(row["current_query_time"]))}</td>
           <td>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f}</td>
@@ -1369,7 +1391,7 @@ def collector_page(
           <section class="panel" style="margin-top:16px">
             <div class="panel-title"><div><h2>最近变化事件</h2>
               <p class="muted">最多显示 200 条；时间表示相邻两次查询之间。</p></div></div>
-            <div class="table-wrap"><table><thead><tr><th>楼栋</th><th>房间</th>
+            <div class="table-wrap"><table><thead><tr><th colspan="2">房间</th>
               <th>变化发生区间</th><th>余额</th><th>变化量</th><th>推测类型</th></tr></thead>
               <tbody>{event_rows}</tbody></table></div>
           </section>

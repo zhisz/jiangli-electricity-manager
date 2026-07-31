@@ -17,13 +17,26 @@ public final class RechargeRecord {
     public final LocalDate date;
     public final LocalTime time;
     public final double amount;
+    /** 仅官方订单接口确认的充值，才允许参与小时级余额趋势的精确校正。 */
+    public final boolean officiallyConfirmed;
 
     public RechargeRecord(long id, long timestamp, double amount, ZoneId zoneId) {
+        this(id, timestamp, amount, zoneId, true);
+    }
+
+    public RechargeRecord(
+            long id,
+            long timestamp,
+            double amount,
+            ZoneId zoneId,
+            boolean officiallyConfirmed
+    ) {
         this.id = id;
         this.timestamp = timestamp;
         this.date = Instant.ofEpochMilli(timestamp).atZone(zoneId).toLocalDate();
         this.time = Instant.ofEpochMilli(timestamp).atZone(zoneId).toLocalTime()
                 .withSecond(0).withNano(0);
         this.amount = amount;
+        this.officiallyConfirmed = officiallyConfirmed;
     }
 }

@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 30,
-  "versionName": "0.21.0",
-  "minSupportedVersionCode": 21,
+  "versionCode": 40,
+  "versionName": "1.2.6",
+  "minSupportedVersionCode": 40,
   "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-0.21.0.apk",
+  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.2.6.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "App 正式更名为江理电费管家，首页标注南昌校区，并新增开发者署名和反馈邮箱。"
+  "releaseNotes": "余额趋势始终加载最近30天，单个屏幕视口约展示7天；默认显示最新7天，向左滑动可连续查看更早数据，并移除误导性的范围切换。"
 }

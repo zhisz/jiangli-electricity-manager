@@ -68,8 +68,7 @@ public final class RoomDetailActivity extends Activity {
     private TextView balanceAmountText;
     private TextView balanceUpdatedText;
     private TextView balanceStateText;
-    private TextView monitorStatusText;
-    private TextView scheduleText;
+    private TextView monitorStatePillText;
     private TextView trendTitleText;
     private TextView historySummaryText;
     private TextView dailyUsageDetailText;
@@ -79,24 +78,14 @@ public final class RoomDetailActivity extends Activity {
     private DailyUsageAxisView dailyUsageAxisView;
     private HorizontalScrollView balanceTrendScrollView;
     private HorizontalScrollView dailyUsageScrollView;
-    private EditText aliasInput;
-    private EditText thresholdInput;
-    private EditText recoveryInput;
-    private EditText repeatMinutesInput;
-    private RadioButton amountRadio;
     private Button queryButton;
-    private Button saveButton;
-    private Button cancelMonitoringButton;
-    private Button deleteButton;
     private Button rechargeRecordsButton;
     private Button onlineRechargeButton;
-    private Button saveAliasButton;
-    private Button reminderSettingsHeaderButton;
     private LinearLayout balanceTrendContainer;
     private LinearLayout dailyUsageContainer;
-    private LinearLayout reminderSettingsContent;
     private LinearLayout quickActionsContainer;
     private List<HistoryPoint> latestHistoryPoints = new ArrayList<>();
+    private List<HistoryPoint> latestHourlyReadings = new ArrayList<>();
     private List<RechargeRecord> latestRechargeRecords = new ArrayList<>();
     private int dailyUsageDays = 30;
     /** 防止快速连点并发申请两个一次性令牌或创建两个充值订单。 */
@@ -171,6 +160,8 @@ public final class RoomDetailActivity extends Activity {
         }
 
         findViewById(R.id.backButton).setOnClickListener(view -> finish());
+        findViewById(R.id.roomSettingsButton).setOnClickListener(view -> openRoomSettings());
+        monitorStatePillText.setOnClickListener(view -> openRoomSettings());
         queryButton.setOnClickListener(view -> queryNow(false));
         findViewById(R.id.openUsageStatisticsButton).setOnClickListener(view ->
                 startActivity(UsageStatisticsActivity.createIntent(this, roomId))
@@ -179,13 +170,6 @@ public final class RoomDetailActivity extends Activity {
                 startActivity(RechargeRecordsActivity.createIntent(this, roomId))
         );
         onlineRechargeButton.setOnClickListener(view -> startOnlineRecharge());
-        saveAliasButton.setOnClickListener(view -> saveAliasOnly());
-        reminderSettingsHeaderButton.setOnClickListener(view -> toggleSettingsSection(
-                reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置"
-        ));
-        saveButton.setOnClickListener(view -> saveAndSchedule());
-        cancelMonitoringButton.setOnClickListener(view -> confirmCancelMonitoring());
-        deleteButton.setOnClickListener(view -> confirmDelete());
 
         // 已保存房间进入详情后自动刷新一次；新增房间尚无有效 roomCode，不自动请求。
         if (savedRoom && repository.isConfigured(roomId)) {
@@ -204,11 +188,10 @@ public final class RoomDetailActivity extends Activity {
         }
         if (repository == null || !savedRoom || !repository.isConfigured(roomId)) return;
         AppConfig config = repository.load(roomId);
+        detailTitle.setText(config.alias);
         if (repository.isMonitoringEnabled(roomId)) {
             Scheduler.scheduleAll(this, roomId, config.checkTimes);
         }
-        updateScheduleText(config);
-        updateMonitoringButtons();
         // 从充值记录页面返回后立即重算摘要，不要求用户重新进入房间。
         refreshHistory();
         if (automaticQueryStarted) refreshMonitorStatus(config);
@@ -249,8 +232,7 @@ public final class RoomDetailActivity extends Activity {
         balanceAmountText = findViewById(R.id.balanceAmountText);
         balanceUpdatedText = findViewById(R.id.balanceUpdatedText);
         balanceStateText = findViewById(R.id.balanceStateText);
-        monitorStatusText = findViewById(R.id.monitorStatusText);
-        scheduleText = findViewById(R.id.scheduleText);
+        monitorStatePillText = findViewById(R.id.monitorStatePillText);
         trendTitleText = findViewById(R.id.trendTitleText);
         historySummaryText = findViewById(R.id.historySummaryText);
         dailyUsageDetailText = findViewById(R.id.dailyUsageDetailText);
@@ -262,36 +244,21 @@ public final class RoomDetailActivity extends Activity {
         dailyUsageScrollView = findViewById(R.id.dailyUsageScrollView);
         balanceTrendContainer = findViewById(R.id.balanceTrendContainer);
         dailyUsageContainer = findViewById(R.id.dailyUsageContainer);
-        aliasInput = findViewById(R.id.aliasInput);
-        thresholdInput = findViewById(R.id.thresholdInput);
-        recoveryInput = findViewById(R.id.recoveryInput);
-        repeatMinutesInput = findViewById(R.id.repeatMinutesInput);
-        amountRadio = findViewById(R.id.amountRadio);
         queryButton = findViewById(R.id.queryButton);
-        saveButton = findViewById(R.id.saveButton);
-        cancelMonitoringButton = findViewById(R.id.cancelMonitoringButton);
-        deleteButton = findViewById(R.id.deleteButton);
         rechargeRecordsButton = findViewById(R.id.openRechargeRecordsButton);
         onlineRechargeButton = findViewById(R.id.openOnlineRechargeButton);
-        saveAliasButton = findViewById(R.id.saveAliasButton);
-        reminderSettingsHeaderButton = findViewById(R.id.reminderSettingsHeaderButton);
-        reminderSettingsContent = findViewById(R.id.reminderSettingsContent);
         quickActionsContainer = findViewById(R.id.quickActionsContainer);
-        updateMonitoringButtons();
     }
 
     private void populate(AppConfig config) {
-        detailTitle.setText(savedRoom ? config.alias : "添加房间");
-        aliasInput.setText(config.alias);
-        amountRadio.setChecked("amount".equals(config.metric));
-        ((RadioButton) findViewById(R.id.surplusRadio)).setChecked("surplus".equals(config.metric));
-        thresholdInput.setText(number(config.threshold));
-        recoveryInput.setText(number(config.recoveryThreshold));
-        repeatMinutesInput.setText(number(config.repeatMinutes));
-        saveAliasButton.setEnabled(savedRoom);
-        // 添加流程已在首页完成房间选择，详情页只让用户维护备注和提醒规则。
-        setSettingsSection(reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", !savedRoom);
-        if (savedRoom) updateScheduleText(config);
+        detailTitle.setText(config.alias);
+        quickActionsContainer.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
+        rechargeRecordsButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
+        onlineRechargeButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
+    }
+
+    private void openRoomSettings() {
+        startActivity(RoomSettingsActivity.createIntent(this, roomId));
     }
 
     /**
@@ -1093,156 +1060,13 @@ public final class RoomDetailActivity extends Activity {
         );
     }
 
-    /** 折叠只改变可见性，不重新 inflate 或清空输入框，所以用户尚未保存的内容会完整保留。 */
-    private void toggleSettingsSection(LinearLayout content, Button header, String title) {
-        setSettingsSection(content, header, title, content.getVisibility() != View.VISIBLE);
-    }
-
-    private void setSettingsSection(
-            LinearLayout content, Button header, String title, boolean expanded
-    ) {
-        header.setText(title + (expanded ? "  ▴" : "  ▾"));
-        header.setContentDescription(title + (expanded ? "，已展开，点击折叠" : "，已折叠，点击展开"));
-        if (expanded && content.getVisibility() != View.VISIBLE) {
-            content.setAlpha(0f);
-            content.setVisibility(View.VISIBLE);
-            content.animate().alpha(1f).setDuration(180L).start();
-        } else if (!expanded) {
-            content.animate().cancel();
-            content.setVisibility(View.GONE);
-            content.setAlpha(1f);
-        }
-    }
-
-    /** 只保存别名，不触碰页面中尚未保存的提醒规则，也不会启用、暂停或重排后台任务。 */
-    private void saveAliasOnly() {
-        try {
-            String alias = repository.updateAlias(roomId, text(aliasInput));
-            aliasInput.setText(alias);
-            detailTitle.setText(alias);
-            toast("房间别名已保存");
-        } catch (IllegalArgumentException exception) {
-            toast(exception.getMessage());
-        }
-    }
-
-    private AppConfig readForm() {
-        thresholdInput.setError(null);
-        recoveryInput.setError(null);
-        repeatMinutesInput.setError(null);
-        try {
-            if (!savedRoom || !repository.contains(roomId)) {
-                throw new IllegalArgumentException("请从首页重新添加房间");
-            }
-            AppConfig savedConfig = repository.load(roomId);
-            double threshold = parseNumber(thresholdInput, "请输入提醒阈值");
-            double recovery = parseNumber(recoveryInput, "请输入恢复阈值");
-            double repeatMinutes = parseNumber(repeatMinutesInput, "请输入复查间隔");
-            if (recovery <= threshold) {
-                recoveryInput.setError("恢复阈值必须大于提醒阈值");
-                throw new IllegalArgumentException("请检查恢复阈值");
-            }
-            if (repeatMinutes < 1) {
-                repeatMinutesInput.setError("复查间隔至少为 1 分钟");
-                throw new IllegalArgumentException("请检查复查间隔");
-            }
-            // 0.16.0 的调度固定为每个整点。旧时间列表仅继续随配置保存，目的是升级时能
-            // 精确取消系统里尚未触发的旧闹钟；用户界面不再要求维护这些时间点。
-            List<DailyCheckTime> legacyTimes = savedRoom && repository.contains(roomId)
-                    ? repository.load(roomId).checkTimes
-                    : Collections.singletonList(new DailyCheckTime(9, 0));
-            AppConfig config = new AppConfig(
-                    text(aliasInput),
-                    // 房间码只在首页添加窗口确定。详情页不再提供修改入口，防止用户
-                    // 误改代码后让已有历史、充值记录和监测规则指向另一个房间。
-                    savedConfig.roomCode,
-                    amountRadio.isChecked() ? "amount" : "surplus",
-                    threshold,
-                    recovery,
-                    repeatMinutes,
-                    legacyTimes
-            );
-            config.validate();
-            return config;
-        } catch (NumberFormatException exception) {
-            setSettingsSection(
-                    reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", true
-            );
-            throw new IllegalArgumentException("阈值和重复间隔必须填写数字");
-        } catch (IllegalArgumentException exception) {
-            setSettingsSection(
-                    reminderSettingsContent, reminderSettingsHeaderButton, "提醒设置", true
-            );
-            throw exception;
-        }
-    }
-
-    private double parseNumber(EditText input, String emptyMessage) {
-        if (text(input).isEmpty()) {
-            input.setError(emptyMessage);
-            throw new IllegalArgumentException(emptyMessage);
-        }
-        try {
-            return Double.parseDouble(text(input));
-        } catch (NumberFormatException exception) {
-            input.setError("请输入有效数字");
-            throw exception;
-        }
-    }
-
-    private void saveAndSchedule() {
-        try {
-            AppConfig config = readForm();
-            List<DailyCheckTime> oldTimes = savedRoom && repository.contains(roomId)
-                    ? repository.load(roomId).checkTimes : Collections.emptyList();
-            repository.save(roomId, config);
-            // scheduleAll 会取消升级前的自定义时间闹钟，并只预约下一个整点。
-            Scheduler.cancelDailyAlarms(this, roomId, oldTimes);
-            savedRoom = true;
-            repository.setMonitoringEnabled(roomId, true);
-            detailTitle.setText(config.alias);
-            saveAliasButton.setEnabled(true);
-            updateMonitoringButtons();
-            monitorState.resetLowAlertState();
-            Scheduler.cancelRepeat(this, roomId);
-            Scheduler.scheduleAll(this, roomId, config.checkTimes);
-            updateScheduleText(config);
-            refreshMonitorStatus(config);
-            // 系统权限统一由首页“设置检查”维护，详情页只负责当前房间的业务配置。
-            SystemSettingsStatus settings = SystemSettingsChecker.check(this);
-            toast(settings.allReady()
-                    ? "房间配置已保存，每整点监测已启用"
-                    : "配置已保存并启用；首页设置检查仍有 "
-                    + settings.missingCount() + " 项待处理");
-        } catch (IllegalArgumentException exception) {
-            toast(exception.getMessage());
-        }
-    }
-
     private void queryNow(boolean automatic) {
-        final AppConfig config;
-        try {
-            config = readForm();
-            boolean wasMonitoring = savedRoom && repository.contains(roomId)
-                    && repository.isMonitoringEnabled(roomId);
-            List<DailyCheckTime> oldTimes = savedRoom && repository.contains(roomId)
-                    ? repository.load(roomId).checkTimes : Collections.emptyList();
-            // 自动查询只针对已经保存的房间；手动查询新房间时先保存，保证历史有稳定 roomId。
-            repository.save(roomId, config);
-            // “立即查询”也会保存表单；若监测已启用，确保下一次整点闹钟仍然存在。
-            if (wasMonitoring) {
-                Scheduler.cancelDailyAlarms(this, roomId, oldTimes);
-                Scheduler.scheduleAll(this, roomId, config.checkTimes);
-            }
-            savedRoom = true;
-            detailTitle.setText(config.alias);
-            saveAliasButton.setEnabled(true);
-            updateMonitoringButtons();
-            updateScheduleText(config);
-        } catch (IllegalArgumentException exception) {
-            if (!automatic) toast(exception.getMessage());
+        if (!savedRoom || !repository.isConfigured(roomId)) {
+            if (!automatic) toast("房间配置不存在，请返回首页重新添加");
             return;
         }
+        // 详情页不再承载设置表单，刷新只读取已经保存的配置，绝不会顺带改备注或监测状态。
+        final AppConfig config = repository.load(roomId);
 
         setBusy(true);
         balanceUpdatedText.setText(automatic ? "正在自动更新余额……" : "正在刷新余额……");
@@ -1293,83 +1117,59 @@ public final class RoomDetailActivity extends Activity {
     }
 
     private void refreshMonitorStatus(AppConfig config) {
-        String status;
-        String shortStatus;
-        int background;
-        int textColor;
-        if (savedRoom && !repository.isMonitoringEnabled(roomId)) {
-            status = "整点监测已暂停；手动查询、配置和历史数据仍可使用";
-            shortStatus = "监测暂停";
-            background = R.drawable.status_pill_neutral;
-            textColor = R.color.text_secondary;
-        } else if (!monitorState.getLastError().isEmpty()) {
-            status = "监测异常：" + monitorState.getLastError();
-            shortStatus = "查询异常";
-            background = R.drawable.status_pill_danger;
-            textColor = R.color.status_danger;
-        } else if (monitorState.isLowAlertActive()) {
-            status = "余额不足，正在按设定间隔重复查询";
-            shortStatus = "余额不足";
-            background = R.drawable.status_pill_warning;
-            textColor = R.color.status_warning;
+        String balanceStatus;
+        int balanceBackground;
+        int balanceColor;
+        // 查询异常优先于阈值判断，避免失败后把上一次偏低余额误显示为当前“余额不足”。
+        if (!monitorState.getLastError().isEmpty()) {
+            balanceStatus = "查询异常";
+            balanceBackground = R.drawable.status_pill_danger;
+            balanceColor = R.color.status_danger;
         } else if (monitorState.getLastSuccessAt() <= 0) {
-            status = "等待首次成功查询";
-            shortStatus = "等待查询";
-            background = R.drawable.status_pill_neutral;
-            textColor = R.color.text_secondary;
+            balanceStatus = "等待查询";
+            balanceBackground = R.drawable.status_pill_neutral;
+            balanceColor = R.color.text_secondary;
         } else {
             Reading latest = new Reading(
                     monitorState.getLastSurplus(), monitorState.getLastAmount(),
                     monitorState.getLastSuccessAt()
             );
             boolean below = monitorState.isBelowAlertThreshold(config, latest);
-            status = below ? "余额低于提醒阈值，等待整点任务启动告警" : "余额正常，后台每整点监测中";
-            shortStatus = below ? "余额偏低" : "余额正常";
-            background = below ? R.drawable.status_pill_warning : R.drawable.status_pill_normal;
-            textColor = below ? R.color.status_warning : R.color.status_normal;
+            balanceStatus = below ? "余额不足" : "余额正常";
+            balanceBackground = below
+                    ? R.drawable.status_pill_warning : R.drawable.status_pill_normal;
+            balanceColor = below ? R.color.status_warning : R.color.status_normal;
         }
-        monitorStatusText.setText(status);
-        balanceStateText.setText(shortStatus);
-        balanceStateText.setBackgroundResource(background);
-        balanceStateText.setTextColor(getColor(textColor));
+        balanceStateText.setText(balanceStatus);
+        balanceStateText.setBackgroundResource(balanceBackground);
+        balanceStateText.setTextColor(getColor(balanceColor));
+
+        boolean enabled = savedRoom && repository.isMonitoringEnabled(roomId);
+        monitorStatePillText.setText(enabled ? "监测中" : "未开启");
+        monitorStatePillText.setBackgroundResource(
+                enabled ? R.drawable.status_pill_normal : R.drawable.status_pill_neutral
+        );
+        monitorStatePillText.setTextColor(getColor(
+                enabled ? R.color.status_normal : R.color.text_secondary
+        ));
+        monitorStatePillText.setContentDescription(
+                (enabled ? "余额监测中" : "余额监测未开启") + "，点击进入房间设置"
+        );
     }
 
     private void refreshHistory() {
         // 多读两天用于计算 60 天柱状图第一根柱子的“前一天 → 当天”消耗。
         latestHistoryPoints = historyStore.loadDailyPoints(roomId, 62);
         latestRechargeRecords = historyStore.loadRecharges(roomId);
-        // 余额趋势加载最近 30 天整小时采样。宽时间轴由 HorizontalScrollView 承载，
-        // 用户向左滑即可查看旧数据，不会把最多 720 个小时点强行压缩到一屏。
-        // 向前保留一个窗口外点，才能计算可见第一段的真实耗电速率。
-        List<HistoryPoint> hourlyReadings = historyStore.loadHourlyPoints(roomId, 30 * 24);
-        long trendCutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1_000;
-        int firstVisible = 0;
-        while (firstVisible < hourlyReadings.size()
-                && hourlyReadings.get(firstVisible).timestamp < trendCutoff) {
-            firstVisible++;
-        }
-        int calculationStart = Math.max(0, firstVisible - 1);
-        if (calculationStart > 0) {
-            hourlyReadings = new ArrayList<>(
-                    hourlyReadings.subList(calculationStart, hourlyReadings.size())
-            );
-        }
-        List<BalanceTrendPoint> hourlyTrend = BalanceTrendCalculator.calculate(
-                hourlyReadings, latestRechargeRecords
-        );
-        trendView.setData(hourlyTrend, latestRechargeRecords);
-        balanceTrendAxisView.setData(hourlyTrend);
-        // 默认从最右侧的最新记录开始查看；用户随后可自然地向左回看更早时段。
-        balanceTrendScrollView.post(
-                () -> balanceTrendScrollView.fullScroll(View.FOCUS_RIGHT)
-        );
+        latestHourlyReadings = historyStore.loadHourlyPoints(roomId, 30 * 24);
+        refreshBalanceTrend();
         if (dailyUsageContainer.getVisibility() == View.VISIBLE) renderDailyUsageChart();
         List<HistoryPoint> trendPoints = tail(latestHistoryPoints, 60);
         if (trendPoints.size() < 2) {
             historySummaryText.setText(String.format(
                     Locale.CHINA,
                     "已记录 %d 个采样日、%d 个近期小时点；整点监测运行后可查看时段速率。",
-                    trendPoints.size(), hourlyTrend.size()
+                    trendPoints.size(), latestHourlyReadings.size()
             ));
             return;
         }
@@ -1396,6 +1196,46 @@ public final class RoomDetailActivity extends Activity {
                 trendPoints.size(), stats.usageKwh, stats.costAmount,
                 recordedRechargeAmount, stats.excludedRechargeIntervals
         ));
+    }
+
+    /**
+     * 数据范围始终为最近 30 天，屏幕视口固定约为 7 天。
+     *
+     * <p>“7 天”描述的是用户一次能看到的横轴宽度，而不是只加载 7 天数据。内容 View
+     * 会按 ScrollView 的真实可用宽度换算比例：完整 30 天约为 4.29 个视口；首次定位
+     * 最右侧展示最近 7 天，向左滑动即可连续查看更早的 23 天。</p>
+     */
+    private void refreshBalanceTrend() {
+        if (trendView == null || latestHourlyReadings == null) return;
+        long cutoff = System.currentTimeMillis()
+                - 30L * 24 * 60 * 60 * 1_000;
+        /*
+         * 必须先用完整历史计算，再裁出 30 天窗口。若先裁剪，窗口开头以前的同小时
+         * 用电分布会丢失，尾部预测也无法使用最近 7 天已经确认的速率训练样本。
+         */
+        List<BalanceTrendPoint> calculated = BalanceTrendCalculator.calculate(
+                latestHourlyReadings, latestRechargeRecords
+        );
+        List<BalanceTrendPoint> visible = new ArrayList<>();
+        BalanceTrendPoint anchor = null;
+        for (BalanceTrendPoint point : calculated) {
+            if (point.reading.timestamp < cutoff) {
+                anchor = point;
+            } else {
+                if (visible.isEmpty() && anchor != null) visible.add(anchor);
+                visible.add(point);
+            }
+        }
+        trendView.setData(visible, Collections.emptyList());
+        balanceTrendAxisView.setData(visible);
+        updateBalanceTrendTitle();
+        balanceTrendScrollView.post(() -> {
+            trendView.setViewportWidth(balanceTrendScrollView.getWidth());
+            // setViewportWidth 会触发内容 View 重新测量；再投递一轮，确保滚动范围已经更新。
+            balanceTrendScrollView.post(
+                    () -> balanceTrendScrollView.fullScroll(View.FOCUS_RIGHT)
+            );
+        });
     }
 
     /** 云端有新增记录时才刷新图表；页面已销毁或无新增记录时不做任何 UI 操作。 */
@@ -1434,49 +1274,41 @@ public final class RoomDetailActivity extends Activity {
     private void updateBalanceTrendTitle() {
         boolean showAmount = ((RadioButton) findViewById(R.id.amountTrendRadio)).isChecked();
         trendTitleText.setText(showAmount
-                ? "余额趋势 · 最近 30 天电费"
-                : "余额趋势 · 最近 30 天电量");
+                ? "余额趋势 · 近 30 天电费"
+                : "余额趋势 · 近 30 天电量");
     }
 
-    /** 点击趋势的某个时段后，同时给出用量、金额、每小时速率和该区间充值笔数。 */
+    /** 详情以用户当前看到的趋势值为主，底层平台采样仅用于算法校正，不增加阅读负担。 */
     private void showTrendDetail(BalanceTrendPoint point) {
         TextView detail = findViewById(R.id.trendDetailText);
         ZoneId zoneId = ZoneId.systemDefault();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
-                "M月d日 HH:mm", Locale.CHINA
+                "yyyy年M月d日 HH:mm", Locale.CHINA
         );
-        String start = formatter.format(
-                Instant.ofEpochMilli(point.intervalStart).atZone(zoneId)
-        );
-        String end = formatter.format(
+        String sampledAt = formatter.format(
                 Instant.ofEpochMilli(point.reading.timestamp).atZone(zoneId)
         );
-        if (point.awaitingSourceUpdate) {
-            detail.setText(start + "–" + end
-                    + "：余额源尚未产生下一次变化，该时段正在等待结算，暂不显示为零用电");
-            return;
+        String suffix;
+        if (point.unmatchedIncrease) {
+            suffix = "\n该时段变化较大，趋势将在后续数据更新后继续校正";
+        } else if (point.awaitingSourceUpdate && point.rateValid) {
+            suffix = String.format(
+                    Locale.CHINA,
+                    "\n预测波动范围 %.2f～%.2f 度 · 等待平台更新",
+                    point.confidenceLowSurplus,
+                    point.confidenceHighSurplus
+            );
+        } else if (point.awaitingSourceUpdate) {
+            suffix = "\n历史数据仍在积累，后续趋势会逐步完善";
+        } else if (point.estimated) {
+            suffix = "\n已根据近期相同时段的用电规律平滑处理";
+        } else {
+            suffix = "";
         }
-        if (!point.rateValid) {
-            detail.setText(point.unmatchedIncrease
-                    ? start + "–" + end + "：检测到未登记的余额上涨，无法可靠计算该时段速率"
-                    : start + "–" + end + "：采样间隔不足，暂时无法计算速率");
-            return;
-        }
-        String recharge = point.rechargeCount > 0
-                ? String.format(
-                        Locale.CHINA, " · 期间 %d 笔充值共 %.2f 元",
-                        point.rechargeCount, point.rechargeAmount
-                ) : "";
-        String estimate = point.estimated
-                ? String.format(
-                        Locale.CHINA, "（根据 %.1f 小时累计变化均摊）",
-                        point.estimateSpanHours
-                ) : "（相邻采样直接计算）";
         detail.setText(String.format(
                 Locale.CHINA,
-                "%s–%s：用电 %.3f 度 · %.3f 度/小时 · 约 %.2f 元%s\n%s",
-                start, end, point.usageKwh, point.rateKwhPerHour,
-                point.costAmount, recharge, estimate
+                "%s · 趋势余额 %.2f 度 · 约 %.2f 元%s",
+                sampledAt, point.displayedSurplus, point.displayedAmount, suffix
         ));
     }
 
@@ -1544,64 +1376,6 @@ public final class RoomDetailActivity extends Activity {
         balanceUpdatedText.setTextColor(getColor(R.color.status_danger));
     }
 
-    private void updateScheduleText(AppConfig config) {
-        if (savedRoom && !repository.isMonitoringEnabled(roomId)) {
-            scheduleText.setText("整点自动监测已暂停\n房间配置与历史曲线已保留。");
-            return;
-        }
-        String precision = Scheduler.canScheduleExactAlarms(this)
-                ? "精确闹钟已允许" : "未允许精确闹钟，系统可能延迟";
-        scheduleText.setText(String.format(
-                Locale.CHINA,
-                "每天 00:00–23:00 每个整点自动查询并记录\n"
-                        + "余额持续不足每 %.0f 分钟复查 · %s",
-                config.repeatMinutes, precision
-        ));
-    }
-
-    private void confirmCancelMonitoring() {
-        new AlertDialog.Builder(this)
-                .setTitle("取消整点监测")
-                .setMessage("将停止该房间的整点查询和低余额重复提醒，但保留配置与历史曲线。")
-                .setNegativeButton("暂不取消", null)
-                .setPositiveButton("确认取消", (dialog, which) -> {
-                    repository.setMonitoringEnabled(roomId, false);
-                    Scheduler.cancelAllForRoom(this, roomId);
-                    monitorState.resetLowAlertState();
-                    AppConfig config = repository.load(roomId);
-                    updateScheduleText(config);
-                    refreshMonitorStatus(config);
-                    updateMonitoringButtons();
-                    toast("该房间的整点监测已暂停");
-                })
-                .show();
-    }
-
-    private void updateMonitoringButtons() {
-        if (cancelMonitoringButton == null || deleteButton == null) return;
-        deleteButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        rechargeRecordsButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        onlineRechargeButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        quickActionsContainer.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        cancelMonitoringButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        boolean enabled = savedRoom && repository.isMonitoringEnabled(roomId);
-        cancelMonitoringButton.setEnabled(enabled);
-        cancelMonitoringButton.setText(enabled ? "取消整点监测" : "整点监测已暂停");
-        if (saveAliasButton != null) saveAliasButton.setEnabled(savedRoom);
-    }
-
-    private void confirmDelete() {
-        new AlertDialog.Builder(this)
-                .setTitle("删除房间")
-                .setMessage("将删除该房间配置、历史曲线和后台提醒，且无法恢复。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("删除", (dialog, which) -> {
-                    repository.delete(roomId);
-                    finish();
-                })
-                .show();
-    }
-
     private void applySystemBarInsets() {
         View content = findViewById(android.R.id.content);
         content.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -1617,7 +1391,6 @@ public final class RoomDetailActivity extends Activity {
     private void setBusy(boolean busy) {
         queryButton.setEnabled(!busy);
         queryButton.setText(busy ? "刷新中…" : "↻ 刷新");
-        saveButton.setEnabled(!busy);
     }
 
     private String text(EditText input) {

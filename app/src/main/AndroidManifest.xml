@@ -19,6 +19,7 @@
     </queries>
 
     <application
+        android:name=".ElecApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -38,6 +39,10 @@
 
         <activity
             android:name=".RoomDetailActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".RoomSettingsActivity"
             android:exported="false" />
 
         <activity

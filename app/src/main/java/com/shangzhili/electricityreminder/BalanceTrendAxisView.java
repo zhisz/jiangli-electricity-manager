@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 固定在 30 天余额趋势左侧的纵轴。
+ * 固定在 7/30 天余额趋势左侧的纵轴。
  *
  * <p>趋势内容本身会放进 HorizontalScrollView 并横向滑动。如果把刻度也画在趋势 View
  * 内，用户一向左查看历史，纵轴数值就会离开屏幕。这里独立绘制最大值、中间值和最小值，
@@ -47,8 +47,9 @@ public final class BalanceTrendAxisView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        float top = dp(16);
-        float bottom = getHeight() - dp(78);
+        float top = dp(18);
+        // 必须与 ElectricityTrendView 的真实余额绘图区完全一致。
+        float bottom = getHeight() - dp(30);
         float axisX = getWidth() - dp(1);
         double[] scale = ElectricityTrendView.calculateValueScale(points, showAmount);
 
