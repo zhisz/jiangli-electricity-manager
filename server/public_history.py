@@ -70,7 +70,7 @@ EVENT_SORT_SQL = {
         "ce.current_query_time DESC"
     ),
     "consumption_amount_desc": (
-        "ABS(COALESCE(s.amount_yuan - ps.amount_yuan, 0)) DESC, "
+        "COALESCE(ps.amount_yuan - s.amount_yuan, 0) DESC, "
         "ce.current_query_time DESC"
     ),
     "balance_desc": "ABS(ce.delta_balance) DESC, ce.current_query_time DESC",
