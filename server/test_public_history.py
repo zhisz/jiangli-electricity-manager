@@ -92,11 +92,30 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertEqual("用电消耗", row[3])
 
         # 后台展示从当前样本/房间目录补齐可读名称，筛选关联仍然只使用稳定 roomCode。
-        event = self.store.collector_overview()["events"][0]
+        overview = self.store.collector_overview(event_sort="amount_desc")
+        event = overview["events"][0]
         self.assertEqual("第一公寓", event["building_name"])
         self.assertEqual("1楼", event["floor_name"])
         self.assertEqual("101", event["room_name"])
         self.assertEqual(self.room.room_code, event["room_code"])
+        self.assertAlmostEqual(-0.9, event["delta_amount"])
+        self.assertEqual("08", overview["distribution"][0]["start_hour"])
+        self.assertEqual("09", overview["distribution"][0]["end_hour"])
+
+        # 每个前端排序值都必须走服务端白名单；未知值安全回退为按最新时间排序。
+        for event_sort in history.EVENT_SORT_SQL:
+            self.assertEqual(
+                self.room.room_code,
+                self.store.collector_overview(event_sort=event_sort)["events"][0][
+                    "room_code"
+                ],
+            )
+        self.assertEqual(
+            self.room.room_code,
+            self.store.collector_overview(event_sort="DROP TABLE samples")[
+                "events"
+            ][0]["room_code"],
+        )
 
     def test_public_history_paginates_and_never_returns_credentials(self):
         for hour in (8, 9, 10):
@@ -125,7 +144,7 @@ class PublicHistoryStoreTests(unittest.TestCase):
         combined = first["records"] + second["records"]
         positive_events = [
             item for item in combined
-            if item.get("changeType") == "疑似充值或平台修正"
+            if item.get("changeType") == "充值"
         ]
         self.assertTrue(positive_events)
         self.assertTrue(positive_events[0]["changeStartAt"])
@@ -186,12 +205,24 @@ class DirectoryScopeTests(unittest.TestCase):
         self.assertEqual(set(history.TARGET_BUILDINGS), {room.building_code for room in rooms})
         self.assertNotIn("001001999", {room.building_code for room in rooms})
 
-    def test_change_type_labels_are_conservative(self):
+    def test_change_type_labels_treat_every_increase_as_recharge(self):
         self.assertEqual("用电消耗", history.infer_change_type(-1))
-        self.assertEqual("疑似充值或平台修正", history.infer_change_type(20))
-        self.assertEqual("疑似充值或平台修正", history.infer_change_type(192.15))
-        self.assertEqual("待确认", history.infer_change_type(1_000))
+        self.assertEqual("充值", history.infer_change_type(20))
+        self.assertEqual("充值", history.infer_change_type(192.15))
+        self.assertEqual("充值", history.infer_change_type(1_000))
         self.assertEqual("待确认", history.infer_change_type(-100))
+
+    def test_collection_round_maps_08_to_20_into_thirteen_rounds(self):
+        self.assertEqual(
+            1, history.collection_round_number("2026-07-31T08:00:00+08:00")
+        )
+        self.assertEqual(
+            13, history.collection_round_number("2026-07-31T20:00:00+08:00")
+        )
+        self.assertEqual(
+            0, history.collection_round_number("2026-07-31T21:00:00+08:00")
+        )
+        self.assertEqual(0, history.collection_round_number("not-a-time"))
 
     def test_negative_balance_is_valid_arrears(self):
         client = object.__new__(history.XiaofubaoClient)

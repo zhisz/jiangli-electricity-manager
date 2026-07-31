@@ -40,8 +40,6 @@ public final class ElectricityTrendView extends View {
     private final Path estimatePath = new Path();
     private final Path areaPath = new Path();
     private final Path confidencePath = new Path();
-    private final SimpleDateFormat timeFormat =
-            new SimpleDateFormat("MM/dd HH:mm", Locale.CHINA);
     private final SimpleDateFormat dayFormat =
             new SimpleDateFormat("MM/dd", Locale.CHINA);
     private final Date labelDate = new Date();
@@ -277,7 +275,7 @@ public final class ElectricityTrendView extends View {
         double before = estimatedValue(previous);
         double after = estimatedValue(current);
         if (after <= before + 0.01) return false;
-        return current.reading.isSuspectedRechargeOrCorrection()
+        return current.reading.isRechargeChange()
                 || current.rechargeCount > 0
                 || current.unmatchedIncrease;
     }
@@ -368,22 +366,40 @@ public final class ElectricityTrendView extends View {
     private void drawTimeLabels(
             Canvas canvas, long startTime, long endTime, float left, float right
     ) {
+        /*
+         * 30 天数据会铺在约 4.3 个屏幕内，因此每一天的刻度本身并不拥挤；真正的重叠
+         * 来自起止位置使用较长的“日期+时间”，又在它旁边继续绘制每日日期。这里按
+         * 实际文字宽度设置最小间隔：只抽稀横轴标签，不删除任何采样点或趋势曲线。
+         */
+        float baseline = getHeight() - dp(8);
+        float minGap = Math.max(dp(52), textPaint.measureText("00/00") + dp(18));
+
         labelDate.setTime(startTime);
         textPaint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText(timeFormat.format(labelDate), left, getHeight() - dp(8), textPaint);
+        canvas.drawText(dayFormat.format(labelDate), left, baseline, textPaint);
+
+        float lastLabelX = left;
         long day = 24L * 60 * 60 * 1_000;
         for (long timestamp = startTime + day;
-             timestamp < endTime - day / 2;
+             timestamp < endTime;
              timestamp += day) {
+            float x = xOf(
+                    timestamp, startTime, Math.max(1, endTime - startTime), left, right
+            );
+            // 给最右侧日期预留一个完整标签间距，避免最后两个刻度在边界处相互覆盖。
+            if (x - lastLabelX < minGap || right - x < minGap) continue;
             labelDate.setTime(timestamp);
             textPaint.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText(dayFormat.format(labelDate),
-                    xOf(timestamp, startTime, Math.max(1, endTime - startTime), left, right),
-                    getHeight() - dp(8), textPaint);
+            canvas.drawText(dayFormat.format(labelDate), x, baseline, textPaint);
+            lastLabelX = x;
         }
-        labelDate.setTime(endTime);
-        textPaint.setTextAlign(Paint.Align.RIGHT);
-        canvas.drawText(timeFormat.format(labelDate), right, getHeight() - dp(8), textPaint);
+
+        // 时间跨度很短时起点标签已经足够；空间充足时才补画终点，彻底消除覆盖。
+        if (right - lastLabelX >= minGap) {
+            labelDate.setTime(endTime);
+            textPaint.setTextAlign(Paint.Align.RIGHT);
+            canvas.drawText(dayFormat.format(labelDate), right, baseline, textPaint);
+        }
     }
 
     private float xOf(long timestamp, long start, long range, float left, float right) {

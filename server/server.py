@@ -34,16 +34,20 @@ try:
     # 作为 package 执行单元测试时使用相对导入；生产环境直接运行 server.py 时使用同目录导入。
     from .public_history import (
         CollectorScheduler,
+        EVENT_SORT_SQL,
         PublicHistoryCollector,
         PublicHistoryStore,
         XiaofubaoClient,
+        parse_iso,
     )
 except ImportError:  # pragma: no cover - 生产脚本入口
     from public_history import (
         CollectorScheduler,
+        EVENT_SORT_SQL,
         PublicHistoryCollector,
         PublicHistoryStore,
         XiaofubaoClient,
+        parse_iso,
     )
 
 
@@ -669,21 +673,26 @@ class Handler(BaseHTTPRequestHandler):
             day = query.get("date", [""])[0].strip()
             building_code = query.get("buildingCode", [""])[0].strip()
             room_code = query.get("roomCode", [""])[0].strip()
+            event_sort = query.get("sort", ["time_desc"])[0].strip()
             if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
                 day = ""
             if building_code and not re.fullmatch(r"\d{9}", building_code):
                 building_code = ""
             if room_code and not re.fullmatch(r"\d{15}", room_code):
                 room_code = ""
+            if event_sort not in EVENT_SORT_SQL:
+                event_sort = "time_desc"
             try:
                 if self.service.public_history_store is None:
                     raise sqlite3.OperationalError("公共历史数据库暂不可用")
                 overview = self.service.public_history_store.collector_overview(
-                    day, building_code, room_code
+                    day, building_code, room_code, event_sort
                 )
                 self._send_html(
                     HTTPStatus.OK,
-                    collector_page(overview, day, building_code, room_code),
+                    collector_page(
+                        overview, day, building_code, room_code, event_sort
+                    ),
                 )
             except sqlite3.Error as exception:
                 self._send_html(
@@ -1279,10 +1288,13 @@ def collector_page(
     day: str,
     building_code: str,
     room_code: str,
+    event_sort: str,
 ) -> str:
-    """云端采集后台；所有变化时间均明确展示为相邻查询之间的发生区间。"""
+    """云端采集后台；优先呈现本轮进度，再提供筛选、排序和变化明细。"""
 
     latest = overview["latest_job"]
+    current_round = int(overview["current_round"])
+    round_total = int(overview["round_total"])
     if latest:
         progress = (
             f'{int(latest["processed_rooms"])}/{int(latest["total_rooms"])}'
@@ -1293,7 +1305,8 @@ def collector_page(
         )
         latest_html = f"""
         <dl>
-          <dt>轮次</dt><dd>{html.escape(str(latest["slot_time"]))}</dd>
+          <dt>当前轮数</dt><dd><strong>第 {current_round or "—"} / {round_total} 轮</strong></dd>
+          <dt>任务时间</dt><dd>{html.escape(_compact_time(str(latest["slot_time"])))}</dd>
           <dt>状态</dt><dd>{html.escape(str(latest["status"]))}</dd>
           <dt>进度</dt><dd>{progress}</dd>
           <dt>成功 / 失败</dt><dd>{int(latest["success_count"])} / {int(latest["failure_count"])}</dd>
@@ -1318,14 +1331,15 @@ def collector_page(
         for row in overview["failures"]
     ) or '<tr><td colspan="2" class="muted">筛选范围内无失败</td></tr>'
     distribution_rows = "".join(
-        f"<tr><td>{html.escape(str(row['hour']))}:00–下一次查询</td>"
+        f"<tr><td>{html.escape(str(row['start_hour']))}:00–"
+        f"{html.escape(str(row['end_hour']))}:00</td>"
         f"<td>{html.escape(str(row['inferred_type']))}</td><td>{int(row['count'])}</td></tr>"
         for row in overview["distribution"]
     ) or '<tr><td colspan="3" class="muted">筛选范围内暂无余额变化</td></tr>'
     event_rows = "".join(
         f"""
         <tr>
-          <td colspan="2"><strong>{html.escape(
+          <td><strong>{html.escape(
               " · ".join(part for part in (
                   str(row.get("building_name") or ""),
                   str(row.get("floor_name") or ""),
@@ -1333,15 +1347,29 @@ def collector_page(
               ) if part) or str(row["room_code"])
           )}</strong><br>
           <span class="muted mono" title="房间码">{html.escape(str(row["room_code"]))}</span></td>
-          <td>{html.escape(str(row["previous_query_time"]))}<br>至<br>
-              {html.escape(str(row["current_query_time"]))}</td>
+          <td>{html.escape(_event_interval(
+              str(row["previous_query_time"]), str(row["current_query_time"])
+          ))}</td>
           <td>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f}</td>
-          <td>{float(row["delta_balance"]):+.2f}</td>
+          <td><strong>{float(row["delta_balance"]):+.2f} 度</strong></td>
+          <td>{_format_delta_amount(row.get("delta_amount"))}</td>
           <td>{html.escape(str(row["inferred_type"]))}</td>
         </tr>
         """
         for row in overview["events"]
     ) or '<tr><td colspan="6" class="muted">筛选范围内暂无变化事件</td></tr>'
+    sort_options = "".join(
+        f'<option value="{value}"{" selected" if event_sort == value else ""}>'
+        f"{html.escape(label)}</option>"
+        for value, label in (
+            ("time_desc", "时间：最新优先"),
+            ("time_asc", "时间：最早优先"),
+            ("building_asc", "楼栋：正序"),
+            ("building_desc", "楼栋：倒序"),
+            ("amount_desc", "金额变化：由大到小"),
+            ("balance_desc", "电量变化：由大到小"),
+        )
+    )
 
     return page_shell(
         "云端采集",
@@ -1359,11 +1387,13 @@ def collector_page(
                 value="{html.escape(building_code)}" placeholder="9 位代码"></label>
               <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
                 value="{html.escape(room_code)}" placeholder="15 位代码"></label>
+              <label>变化事件排序<select name="sort">{sort_options}</select></label>
               <button type="submit">筛选</button>
               <a class="secondary" href="/admin/collector">清除</a>
             </form>
           </section>
           <section class="metric-grid collector-metrics">
+            {_metric("当前轮数", f'{current_round or "—"} / {round_total}', "08:00–20:00 共 13 轮")}
             {_metric("样本总数", overview["total"], "当前筛选范围")}
             {_metric("成功样本", overview["success"], "可供 App 合并")}
             {_metric("失败样本", overview["failure"], "保留分类，不含原始响应")}
@@ -1371,8 +1401,10 @@ def collector_page(
             {_metric("历史数据库", _format_bytes(int(overview["database_bytes"])), "SQLite 文件")}
           </section>
           <section class="two-column">
-            <article class="panel"><div class="panel-title"><h2>最近任务</h2></div>{latest_html}</article>
-            <article class="panel"><div class="panel-title"><h2>各楼栋房间数</h2></div>
+            <article class="panel task-panel"><div class="panel-title"><div><div class="eyebrow">LIVE JOB</div>
+              <h2>当前采集任务</h2></div><span class="pill">每整点执行</span></div>{latest_html}</article>
+            <article class="panel"><div class="panel-title"><div><div class="eyebrow">COVERAGE</div>
+              <h2>采集范围</h2></div><span class="pill">12 栋</span></div>
               <div class="table-wrap"><table><thead><tr><th>楼栋</th><th>代码</th>
               <th>有效房间</th><th>无电表</th></tr></thead><tbody>{building_rows}</tbody></table></div>
             </article>
@@ -1383,22 +1415,55 @@ def collector_page(
               <tbody>{failure_rows}</tbody></table>
             </article>
             <article class="panel"><div class="panel-title"><h2>变化时段分布</h2></div>
-              <p class="muted panel-help">整点采样无法确定平台真实更新时间，仅统计变化发生区间。</p>
-              <table><thead><tr><th>查询区间</th><th>推测类型</th><th>次数</th></tr></thead>
+              <p class="muted panel-help">按两次整点采集之间的直接时间段统计。</p>
+              <table><thead><tr><th>采集区间</th><th>类型</th><th>次数</th></tr></thead>
               <tbody>{distribution_rows}</tbody></table>
             </article>
           </section>
           <section class="panel" style="margin-top:16px">
             <div class="panel-title"><div><h2>最近变化事件</h2>
-              <p class="muted">最多显示 200 条；时间表示相邻两次查询之间。</p></div></div>
-            <div class="table-wrap"><table><thead><tr><th colspan="2">房间</th>
-              <th>变化发生区间</th><th>余额</th><th>变化量</th><th>推测类型</th></tr></thead>
+              <p class="muted">最多显示 200 条；可在顶部按时间、楼栋、金额或电量排序。</p></div>
+              <span class="pill">{html.escape(dict(
+                  time_desc="最新优先", time_asc="最早优先",
+                  building_asc="楼栋正序", building_desc="楼栋倒序",
+                  amount_desc="金额降序", balance_desc="电量降序"
+              ).get(event_sort, "最新优先"))}</span></div>
+            <div class="table-wrap"><table class="event-table"><thead><tr><th>房间</th>
+              <th>采集区间</th><th>余额</th><th>电量变化</th><th>金额变化</th><th>类型</th></tr></thead>
               <tbody>{event_rows}</tbody></table></div>
           </section>
         </main>
         <footer>云端仅保存公共房间采样；用户备注、提醒和充值数据只保存在用户手机</footer>
         """,
     )
+
+
+def _compact_time(value: str) -> str:
+    """后台任务时刻使用上海本地紧凑格式，解析失败时保留原值便于排查。"""
+
+    try:
+        return parse_iso(value).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return value
+
+
+def _event_interval(previous: str, current: str) -> str:
+    """把冗长 ISO 时间改为用户可直接理解的日期与起止时间。"""
+
+    try:
+        start = parse_iso(previous)
+        end = parse_iso(current)
+    except (TypeError, ValueError):
+        return f"{previous}–{current}"
+    if start.date() == end.date():
+        return f'{start:%Y-%m-%d} · {start:%H:%M}–{end:%H:%M}'
+    return f'{start:%m-%d %H:%M}–{end:%m-%d %H:%M}'
+
+
+def _format_delta_amount(value: Any) -> str:
+    if value is None:
+        return '<span class="muted">—</span>'
+    return f"{float(value):+.2f} 元"
 
 
 def _format_bytes(value: int) -> str:
@@ -1471,6 +1536,8 @@ def page_shell(title: str, content: str) -> str:
     .notes p {{ color:var(--muted); line-height:1.7; }}
     .panel-help {{ margin:-8px 0 12px; line-height:1.6; }}
     table {{ width:100%; border-collapse:collapse; }}
+    .table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
+    .event-table {{ min-width:760px; }}
     th,td {{ text-align:left; padding:11px 8px; border-bottom:1px solid var(--border); }}
     th {{ color:var(--muted); font-size:12px; }}
     .download-link,.back-link {{ color:var(--primary); font-weight:700; text-decoration:none; }}
@@ -1485,9 +1552,10 @@ def page_shell(title: str, content: str) -> str:
     .login-card button {{ width:100%; margin-top:14px; }}
     .filters {{ display:flex; align-items:end; gap:10px; flex-wrap:wrap; }}
     .filters label {{ display:grid; gap:6px; color:var(--muted); font-size:12px; }}
-    .filters input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+    .filters input,.filters select {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
-    .collector-metrics {{ grid-template-columns:repeat(5,1fr); margin-top:16px; }}
+    .collector-metrics {{ grid-template-columns:repeat(6,1fr); margin-top:16px; }}
+    .task-panel {{ border-top:3px solid var(--primary); }}
     .error {{ margin-top:16px; padding:12px; border-radius:10px;
       background:#fdecec; color:var(--danger); }}
     .notice {{ margin-top:16px; padding:12px; border-radius:10px;

@@ -48,8 +48,29 @@ TARGET_BUILDINGS: dict[str, str] = {
 ROOM_CODE_PATTERN = r"\d{15}"
 RETENTION_DAYS = 30
 DATA_VERSION = 2
-LARGE_POSITIVE_CHANGE_KWH = 1_000.0
 LARGE_NEGATIVE_CHANGE_KWH = 100.0
+COLLECTION_START_HOUR = 8
+COLLECTION_END_HOUR = 20
+COLLECTION_ROUND_TOTAL = COLLECTION_END_HOUR - COLLECTION_START_HOUR + 1
+
+# 后台排序参数只能映射到这里的固定 SQL，绝不直接拼接用户输入。
+EVENT_SORT_SQL = {
+    "time_desc": "ce.current_query_time DESC",
+    "time_asc": "ce.current_query_time ASC",
+    "building_asc": (
+        "ce.building_code ASC, floor_name ASC, room_name ASC, "
+        "ce.current_query_time DESC"
+    ),
+    "building_desc": (
+        "ce.building_code DESC, floor_name DESC, room_name DESC, "
+        "ce.current_query_time DESC"
+    ),
+    "amount_desc": (
+        "ABS(COALESCE(s.amount_yuan - ps.amount_yuan, 0)) DESC, "
+        "ce.current_query_time DESC"
+    ),
+    "balance_desc": "ABS(ce.delta_balance) DESC, ce.current_query_time DESC",
+}
 
 
 def shanghai_now() -> dt.datetime:
@@ -204,18 +225,15 @@ class PublicHistoryStore:
                 PRAGMA user_version = 1;
                 """
             )
-            # 1.1.0 分类迁移：旧规则对正负变化统一使用 100 度阈值，导致一次约百元充值
-            # （常见可增加 150～200 度）被误标为待确认。只迁移方向明确且低于新正向上限的
-            # 既有事件；房间码、采样、变化量和任务逻辑均不改写。
+            # 新分类规则中，余额正向变化统一视为充值。迁移只改显示分类，不改房间码、
+            # 原始采样值、变化量或任务记录，因此已有 App 历史数据仍可安全合并。
             connection.execute(
                 """
                 UPDATE change_events
-                SET inferred_type = '疑似充值或平台修正'
-                WHERE inferred_type = '待确认'
-                  AND delta_balance > 0
-                  AND delta_balance < ?
-                """,
-                (LARGE_POSITIVE_CHANGE_KWH,),
+                SET inferred_type = '充值'
+                WHERE delta_balance > 0
+                  AND inferred_type != '充值'
+                """
             )
 
     def metadata(self, key: str, fallback: str = "") -> str:
@@ -586,7 +604,11 @@ class PublicHistoryStore:
         }
 
     def collector_overview(
-        self, day: str = "", building_code: str = "", room_code: str = ""
+        self,
+        day: str = "",
+        building_code: str = "",
+        room_code: str = "",
+        event_sort: str = "time_desc",
     ) -> dict[str, Any]:
         conditions: list[str] = []
         values: list[Any] = []
@@ -646,25 +668,32 @@ class PublicHistoryStore:
             )
             distributions = connection.execute(
                 f"""
-                SELECT substr(current_query_time, 12, 2) AS hour,
+                SELECT substr(previous_query_time, 12, 2) AS start_hour,
+                       substr(current_query_time, 12, 2) AS end_hour,
                        inferred_type, COUNT(*) AS count
                 FROM change_events ce{event_where}
-                GROUP BY hour, inferred_type ORDER BY hour, inferred_type
+                GROUP BY start_hour, end_hour, inferred_type
+                ORDER BY end_hour, start_hour, inferred_type
                 """,
                 values,
             ).fetchall()
+            order_sql = EVENT_SORT_SQL.get(event_sort, EVENT_SORT_SQL["time_desc"])
             recent_events = connection.execute(
                 f"""
                 SELECT ce.*,
                        COALESCE(NULLIF(s.floor_name, ''), NULLIF(r.floor_name, ''), '')
                            AS floor_name,
                        COALESCE(NULLIF(s.room_name, ''), NULLIF(r.room_name, ''), '')
-                           AS room_name
+                           AS room_name,
+                       s.amount_yuan AS after_amount,
+                       ps.amount_yuan AS before_amount,
+                       (s.amount_yuan - ps.amount_yuan) AS delta_amount
                 FROM change_events ce
                 LEFT JOIN samples s ON s.id = ce.current_sample_id
+                LEFT JOIN samples ps ON ps.id = ce.previous_sample_id
                 LEFT JOIN rooms r ON r.room_code = ce.room_code
                 {event_where}
-                ORDER BY ce.current_query_time DESC LIMIT 200
+                ORDER BY {order_sql} LIMIT 200
                 """,
                 values,
             ).fetchall()
@@ -680,21 +709,36 @@ class PublicHistoryStore:
             "failures": [dict(row) for row in failures],
             "distribution": [dict(row) for row in distributions],
             "events": [dict(row) for row in recent_events],
+            "current_round": collection_round_number(
+                str(latest_job["slot_time"]) if latest_job else ""
+            ),
+            "round_total": COLLECTION_ROUND_TOTAL,
             "database_bytes": self.path.stat().st_size if self.path.exists() else 0,
         }
 
 
 def infer_change_type(delta: float) -> str:
     if delta > 0:
-        # 正向变化最常见原因是充值。电价约为每度数角时，充值百元带来 100～200 多度
-        # 完全合理，不能沿用负向异常的 100 度阈值；极端大于 1000 度仍保守待确认。
-        if delta >= LARGE_POSITIVE_CHANGE_KWH:
-            return "待确认"
-        return "疑似充值或平台修正"
+        # 校付宝余额只有发生充值后才会上涨，正向变化直接使用用户可理解的确定分类。
+        return "充值"
     # 一小时下降 100 度以上更可能是平台修正、表号变动或异常值，继续要求人工确认。
     if abs(delta) >= LARGE_NEGATIVE_CHANGE_KWH:
         return "待确认"
     return "用电消耗"
+
+
+def collection_round_number(slot_time: str) -> int:
+    """把 08:00～20:00 的任务时刻映射为第 1～13 轮，异常数据安全返回 0。"""
+
+    if not slot_time:
+        return 0
+    try:
+        hour = parse_iso(slot_time).hour
+    except (TypeError, ValueError):
+        return 0
+    if hour < COLLECTION_START_HOUR or hour > COLLECTION_END_HOUR:
+        return 0
+    return hour - COLLECTION_START_HOUR + 1
 
 
 class XiaofubaoClient:
