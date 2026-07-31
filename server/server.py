@@ -1439,37 +1439,44 @@ def collector_page(
           <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
         </header>
         <main class="collector-main">
-          {collector_task_fragment(task)}
-          <section class="panel events-panel" id="events-section">
+          <div class="collector-workspace">
+            <div class="collector-left-column">
+              {collector_task_fragment(task)}
+              <section class="panel distribution-panel" id="distribution-section">
+                <div id="distribution-results">
+                  {collector_distribution_fragment(
+                      distribution, parameters["interval_end_hour"]
+                  )}
+                </div>
+              </section>
+            </div>
+            <section class="panel events-panel" id="events-section">
             <div class="section-heading"><div><div class="eyebrow">CHANGE EVENTS</div>
-              <h2>最近变化事件</h2><p class="muted">完整查询最近 30 天数据，页面分批渲染。</p></div></div>
-            <form id="event-filter-form" class="filters event-filters">
-              <label>日期<input id="event-date" name="date" type="date"
-                value="{html.escape(distribution["day"])}"></label>
-              <label>楼栋<select name="buildingCode">{building_options}</select></label>
-              <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
-                value="{html.escape(parameters["room_code"])}" placeholder="15 位房间码"></label>
-              <label>事件类型<select name="eventType">{event_type_options}</select></label>
-              <label>排序<select name="sort">{sort_options}</select></label>
-              <label>每页<select name="pageSize">{page_size_options}</select></label>
-              <input name="intervalEnd" type="hidden" value="{parameters["interval_end_hour"]}">
-              <input name="snapshot" type="hidden" value="{event_page["snapshot_id"]}">
-              <input name="page" type="hidden" value="{event_page["page"]}">
-              <button type="submit">应用筛选</button>
-              <button class="secondary" id="clear-event-filters" type="button">清除</button>
-            </form>
+              <h2>最近变化事件</h2><p class="muted">最近30天 · 分页查询</p></div></div>
+            <details class="event-filter-drawer">
+              <summary>筛选与排序</summary>
+              <form id="event-filter-form" class="filters event-filters">
+                <label>日期<input id="event-date" name="date" type="date"
+                  value="{html.escape(distribution["day"])}"></label>
+                <label>楼栋<select name="buildingCode">{building_options}</select></label>
+                <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
+                  value="{html.escape(parameters["room_code"])}" placeholder="15 位房间码"></label>
+                <label>事件类型<select name="eventType">{event_type_options}</select></label>
+                <label>排序<select name="sort">{sort_options}</select></label>
+                <label>每页<select name="pageSize">{page_size_options}</select></label>
+                <input name="intervalEnd" type="hidden" value="{parameters["interval_end_hour"]}">
+                <input name="snapshot" type="hidden" value="{event_page["snapshot_id"]}">
+                <input name="page" type="hidden" value="{event_page["page"]}">
+                <button type="submit">应用筛选</button>
+                <button class="secondary" id="clear-event-filters" type="button">清除</button>
+              </form>
+            </details>
             <div id="event-loading" class="local-loading" hidden>正在加载变化事件…</div>
             <div id="events-results" aria-live="polite">
               {collector_events_fragment(event_page)}
             </div>
-          </section>
-          <section class="panel distribution-panel" id="distribution-section">
-            <div id="distribution-results">
-              {collector_distribution_fragment(
-                  distribution, parameters["interval_end_hour"]
-              )}
-            </div>
-          </section>
+            </section>
+          </div>
           <section class="data-note">
             <strong>数据说明</strong>
             <span>服务器只保留最近 30 天公共房间采样；数据库当前占用
@@ -1581,15 +1588,13 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
 def collector_events_fragment(event_page: dict[str, Any]) -> str:
     rows = "".join(_event_row_html(row) for row in event_page["events"])
     if not rows:
-        rows = '<tr><td colspan="8"><div class="empty-state">当前条件下暂无变化事件</div></td></tr>'
+        rows = '<div class="empty-state">当前条件下暂无变化事件</div>'
     previous_disabled = " disabled" if event_page["page"] <= 1 else ""
     next_disabled = " disabled" if event_page["page"] >= event_page["total_pages"] else ""
     return f"""
       <div class="events-meta"><strong>共 {event_page["total"]} 条</strong>
         <span>第 {event_page["page"]} / {event_page["total_pages"]} 页</span></div>
-      <div class="table-wrap"><table class="event-table"><thead><tr>
-        <th>房间</th><th>采集日期</th><th>变化区间</th><th>变化前</th><th>变化后</th>
-        <th>电量变化</th><th>金额变化</th><th>类型</th></tr></thead><tbody>{rows}</tbody></table></div>
+      <div class="event-scroll"><div class="event-list">{rows}</div></div>
       <nav class="pagination" aria-label="事件分页">
         <button class="secondary" type="button" data-event-page="{event_page["page"] - 1}"{previous_disabled}>上一页</button>
         <span>第 {event_page["page"]} 页 · 每页 {event_page["page_size"]} 条</span>
@@ -1606,14 +1611,17 @@ def _event_row_html(row: dict[str, Any]) -> str:
         str(row["previous_query_time"]), str(row["current_query_time"])
     )
     return f"""
-      <tr><td><strong>{html.escape(room_name)}</strong><br>
-        <span class="muted mono">{html.escape(str(row["room_code"]))}</span></td>
-      <td>{html.escape(date_text)}</td><td>{html.escape(interval_text)}</td>
-      <td>{float(row["before_balance"]):.2f} 度</td>
-      <td>{float(row["after_balance"]):.2f} 度</td>
-      <td><strong>{float(row["delta_balance"]):+.2f} 度</strong></td>
-      <td>{_format_delta_amount(row.get("delta_amount"))}</td>
-      <td><span class="event-type">{html.escape(str(row["inferred_type"]))}</span></td></tr>"""
+      <article class="event-row">
+        <div class="event-row-head"><strong>{html.escape(room_name)}</strong>
+          <span class="event-type">{html.escape(str(row["inferred_type"]))}</span></div>
+        <div class="event-row-sub"><span>{html.escape(date_text)} · {html.escape(interval_text)}</span>
+          <span class="mono">{html.escape(str(row["room_code"]))}</span></div>
+        <div class="event-row-values">
+          <span><small>余额</small>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f} 度</span>
+          <span><small>变化</small><strong>{float(row["delta_balance"]):+.2f} 度</strong></span>
+          <span><small>金额</small>{_format_delta_amount(row.get("delta_amount"))}</span>
+        </div>
+      </article>"""
 
 
 def collector_distribution_fragment(
@@ -1629,7 +1637,7 @@ def collector_distribution_fragment(
     return f"""
       <div class="section-heading distribution-heading"><div>
         <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2>
-        <p class="muted">13 轮整点采集形成 12 个相邻分析区间。</p></div>
+        <p class="muted">各时段监测到余额发生变化的房间数量。</p></div>
         <div class="date-nav"><button class="secondary" type="button" data-day-step="-1">上一天</button>
           <input id="distribution-date" type="date" value="{html.escape(distribution["day"])}">
           <button class="secondary" type="button" data-day-step="1">下一天</button>
@@ -1638,10 +1646,9 @@ def collector_distribution_fragment(
       <div class="distribution-summary">
         <span><strong>{distribution["total"]}</strong> 总变化</span>
         <span><strong>{distribution["recharge"]}</strong> 充值</span>
-        <span><strong>{distribution["consumption"]}</strong> 用电消耗</span>
-        <span><strong>{distribution["abnormal"]}</strong> 异常</span>
+        <span><strong>{distribution["consumption"]}</strong> 消耗</span>
       </div>
-      <div class="interval-grid">{interval_rows}</div>"""
+      <div class="interval-list">{interval_rows}</div>"""
 
 
 def _distribution_interval_html(
@@ -1649,18 +1656,22 @@ def _distribution_interval_html(
 ) -> str:
     count = int(row["total_count"])
     width = count / max_count * 100 if max_count else 0
+    recharge = int(row["recharge_count"])
+    consumption = int(row["consumption_count"])
+    recharge_share = recharge / count * 100 if count else 0
+    consumption_share = consumption / count * 100 if count else 0
     selected = " selected" if selected_end_hour == int(row["end_hour"]) else ""
     abnormal = " has-abnormal" if int(row["abnormal_count"]) else ""
     return f"""
       <button class="interval-card{selected}{abnormal}" type="button"
         data-interval-end="{int(row["end_hour"])}">
-        <div class="interval-title"><strong>{int(row["start_hour"]):02d}:00–{int(row["end_hour"]):02d}:00</strong>
-          <span>{count} 条</span></div>
-        <div class="mini-track"><span style="width:{width:.2f}%"></span></div>
-        <div class="interval-stats"><span>充值 {int(row["recharge_count"])}</span>
-          <span>消耗 {int(row["consumption_count"])}</span>
-          <span>电量 {float(row["total_delta_kwh"]):+.2f} 度</span>
-          <span>金额 {float(row["total_delta_amount"]):+.2f} 元</span></div>
+        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]):02d}:00</strong>
+        <div class="interval-visual"><div class="interval-track"><div class="interval-fill" style="width:{width:.2f}%">
+          <span class="consumption-segment" style="width:{consumption_share:.2f}%"></span>
+          <span class="recharge-segment" style="width:{recharge_share:.2f}%"></span>
+        </div></div></div>
+        <div class="interval-counts"><strong>{count}</strong>
+          <span>消耗 {consumption}</span><span>充值 {recharge}</span></div>
       </button>"""
 
 
@@ -1965,7 +1976,9 @@ def page_shell(title: str, content: str) -> str:
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
     .collector-metrics {{ grid-template-columns:repeat(6,1fr); margin-top:16px; }}
     .task-panel {{ border-top:3px solid var(--primary); }}
-    .collector-main > section + section {{ margin-top:16px; }}
+    .collector-workspace {{ display:grid; grid-template-columns:minmax(0,1.35fr) minmax(380px,.85fr);
+      align-items:start; gap:16px; }}
+    .collector-left-column {{ display:grid; gap:16px; min-width:0; }}
     .task-card {{ border-top:3px solid var(--primary); padding:24px; }}
     .task-head,.task-primary,.progress-summary > div:first-child,.coverage-summary,
     .failure-summary,.section-heading,.events-meta,.pagination,.date-nav {{
@@ -2008,18 +2021,37 @@ def page_shell(title: str, content: str) -> str:
     .failure-summary {{ margin-top:16px; padding:13px 14px; border-radius:10px;
       color:#9a4d08; background:#fff7e8; border:1px solid #f7d7a7; }}
     .failure-expand .expandable-content {{ overflow-x:auto; }}
-    .events-panel,.distribution-panel {{ padding:24px; }}
+    .events-panel,.distribution-panel {{ padding:24px; min-width:0; }}
+    .events-panel {{ position:sticky; top:16px; height:calc(100vh - 32px); min-height:650px;
+      max-height:920px; display:flex; flex-direction:column; overflow:hidden; }}
     .section-heading {{ align-items:flex-start; margin-bottom:18px; }}
-    .event-filters {{ padding:14px; background:var(--bg); border-radius:12px; margin-bottom:14px; }}
-    .event-filters label {{ flex:1 1 132px; }}
-    .event-filters label:nth-child(5) {{ flex-basis:220px; }}
+    .event-filter-drawer {{ margin-bottom:12px; border:1px solid var(--border); border-radius:10px; }}
+    .event-filter-drawer > summary {{ cursor:pointer; list-style:none; padding:11px 13px;
+      color:var(--primary); font-size:13px; font-weight:750; }}
+    .event-filter-drawer > summary::-webkit-details-marker {{ display:none; }}
+    .event-filter-drawer[open] > summary {{ border-bottom:1px solid var(--border); }}
+    .event-filters {{ display:grid; grid-template-columns:1fr 1fr; padding:12px; background:var(--bg); }}
+    .event-filters label {{ min-width:0; }}
+    .event-filters label:nth-child(3),.event-filters label:nth-child(5) {{ grid-column:1/-1; }}
     .event-filters input,.event-filters select {{ width:100%; }}
     .event-filters input[type=hidden] {{ display:none; }}
+    #events-results {{ display:flex; flex:1; min-height:0; flex-direction:column; }}
     .events-meta {{ margin:4px 0 10px; color:var(--muted); font-size:13px; }}
-    .event-table {{ min-width:1040px; }}
+    .event-scroll {{ flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border); }}
+    .event-row {{ padding:13px 2px; border-bottom:1px solid var(--border); }}
+    .event-row:last-child {{ border-bottom:0; }}
+    .event-row-head,.event-row-sub,.event-row-values {{ display:flex; justify-content:space-between; gap:10px; }}
+    .event-row-head strong {{ min-width:0; overflow-wrap:anywhere; }}
+    .event-row-sub {{ margin-top:5px; color:var(--muted); font-size:11px; }}
+    .event-row-sub .mono {{ flex:none; }}
+    .event-row-values {{ margin-top:10px; padding:9px 10px; border-radius:9px; background:var(--bg); font-size:12px; }}
+    .event-row-values span {{ min-width:0; }}
+    .event-row-values small {{ display:block; margin-bottom:3px; color:var(--muted); font-size:10px; }}
     .event-type {{ display:inline-block; white-space:nowrap; padding:5px 8px; border-radius:999px;
       background:var(--soft); color:var(--primary); font-size:12px; font-weight:700; }}
-    .pagination {{ justify-content:center; margin-top:16px; color:var(--muted); font-size:13px; }}
+    .pagination {{ justify-content:center; margin-top:12px; color:var(--muted); font-size:12px; }}
+    .pagination button {{ min-height:38px; padding:7px 10px; }}
     button:disabled {{ opacity:.45; cursor:not-allowed; }}
     .local-loading {{ padding:10px 0; color:var(--primary); font-size:13px; }}
     .is-loading {{ opacity:.48; pointer-events:none; transition:opacity .15s ease; }}
@@ -2032,16 +2064,20 @@ def page_shell(title: str, content: str) -> str:
     .distribution-summary {{ display:flex; flex-wrap:wrap; gap:10px 22px; padding:12px 14px;
       border:1px solid var(--border); border-radius:12px; margin-bottom:14px; color:var(--muted); }}
     .distribution-summary strong {{ color:var(--text); margin-right:4px; }}
-    .interval-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }}
-    .interval-card {{ min-height:0; padding:13px; text-align:left; background:var(--surface); color:var(--text);
-      border:1px solid var(--border); border-radius:11px; font-weight:400; }}
+    .interval-list {{ display:grid; gap:4px; }}
+    .interval-card {{ display:grid; grid-template-columns:112px minmax(80px,1fr) 176px; align-items:center;
+      gap:12px; min-height:44px; padding:8px 10px; text-align:left; background:var(--surface); color:var(--text);
+      border:1px solid transparent; border-radius:9px; font-weight:400; }}
     .interval-card:hover,.interval-card.selected {{ border-color:var(--primary); background:var(--soft); }}
     .interval-card.has-abnormal {{ border-color:#d97706; }}
-    .interval-title {{ display:flex; justify-content:space-between; gap:8px; }}
-    .interval-title span {{ color:var(--muted); font-size:12px; }}
-    .mini-track {{ height:5px; margin:9px 0; }}
-    .interval-stats {{ display:grid; grid-template-columns:1fr 1fr; gap:4px 8px;
-      color:var(--muted); font-size:11px; }}
+    .interval-time {{ font-size:12px; }}
+    .interval-track {{ height:7px; background:var(--soft); border-radius:999px; overflow:hidden; }}
+    .interval-fill {{ display:flex; height:100%; min-width:0; border-radius:inherit; overflow:hidden; }}
+    .consumption-segment {{ height:100%; background:var(--primary); }}
+    .recharge-segment {{ height:100%; background:#16875b; }}
+    .interval-counts {{ display:flex; align-items:center; justify-content:flex-end; gap:9px;
+      color:var(--muted); font-size:11px; white-space:nowrap; }}
+    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:15px; }}
     .data-note {{ display:flex; gap:12px; align-items:flex-start; padding:5px 4px;
       color:var(--muted); font-size:12px; line-height:1.6; }}
     .data-note strong {{ color:var(--text); white-space:nowrap; }}
@@ -2052,13 +2088,17 @@ def page_shell(title: str, content: str) -> str:
       background:#fdecec; color:var(--danger); }}
     .notice {{ margin-top:16px; padding:12px; border-radius:10px;
       background:var(--soft); color:var(--primary); }}
+    @media(max-width:1100px) {{
+      .collector-workspace {{ grid-template-columns:1fr; }}
+      .events-panel {{ position:static; height:720px; max-height:none; }}
+    }}
     @media(max-width:920px) {{
       .metric-grid {{ grid-template-columns:repeat(3,1fr); }}
       .two-column {{ grid-template-columns:1fr; }}
       .collector-metrics {{ grid-template-columns:repeat(3,1fr); }}
       .stats-strip {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
       .stat-item {{ border-bottom:1px solid var(--border); }}
-      .interval-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+      .interval-card {{ grid-template-columns:108px minmax(70px,1fr) 160px; }}
     }}
     @media(max-width:560px) {{
       .topbar {{ align-items:flex-start; flex-direction:column; padding-top:28px; }}
@@ -2070,14 +2110,17 @@ def page_shell(title: str, content: str) -> str:
       .round-display {{ min-width:0; width:100%; padding:0 0 14px; border-right:0; border-bottom:1px solid var(--border); }}
       .stats-strip {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
       .stat-item:nth-child(even) {{ border-right:0; }}
-      .event-filters {{ display:grid; grid-template-columns:1fr 1fr; align-items:end; }}
       .event-filters label,.event-filters label:nth-child(5) {{ min-width:0; }}
       .event-filters label:nth-child(3),.event-filters label:nth-child(5) {{ grid-column:1/-1; }}
       .event-filters button {{ width:100%; justify-content:center; }}
       .pagination {{ flex-wrap:wrap; }}
       .distribution-heading {{ align-items:flex-start; }}
       .date-nav {{ justify-content:flex-start; }}
-      .interval-grid {{ grid-template-columns:1fr; }}
+      .interval-card {{ grid-template-columns:1fr auto; gap:5px 10px; }}
+      .interval-visual {{ grid-column:1/-1; grid-row:2; }}
+      .interval-counts {{ grid-column:2; grid-row:1; }}
+      .event-row-values {{ flex-wrap:wrap; }}
+      .events-panel {{ height:680px; }}
       .data-note {{ flex-direction:column; }}
       .back-to-top {{ right:12px; bottom:12px; }}
     }}

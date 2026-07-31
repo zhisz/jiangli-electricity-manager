@@ -70,6 +70,33 @@ class CollectorAdminParameterTests(unittest.TestCase):
         self.assertEqual(1, len(hashes))
         self.assertTrue(hashes[0].startswith("'sha256-"))
 
+    def test_distribution_keeps_only_counts_and_event_categories(self):
+        intervals = [
+            {
+                "start_hour": hour,
+                "end_hour": hour + 1,
+                "total_count": 600 if hour == 17 else 0,
+                "recharge_count": 0,
+                "consumption_count": 600 if hour == 17 else 0,
+                "abnormal_count": 0,
+                "total_delta_kwh": -123.4,
+                "total_delta_amount": -74.04,
+            }
+            for hour in range(8, 20)
+        ]
+        fragment = app_server.collector_distribution_fragment(
+            {
+                "day": "2026-07-31", "total": 600,
+                "recharge": 0, "consumption": 600, "abnormal": 0,
+                "intervals": intervals,
+            }
+        )
+        self.assertIn("17:00–18:00", fragment)
+        self.assertIn("消耗 600", fragment)
+        self.assertIn("充值 0", fragment)
+        self.assertNotIn("-123.4", fragment)
+        self.assertNotIn("-74.04", fragment)
+
 
 class AnalyticsStoreTests(unittest.TestCase):
     def setUp(self):
