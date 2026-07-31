@@ -48,8 +48,37 @@ TARGET_BUILDINGS: dict[str, str] = {
 ROOM_CODE_PATTERN = r"\d{15}"
 RETENTION_DAYS = 30
 DATA_VERSION = 2
-LARGE_POSITIVE_CHANGE_KWH = 1_000.0
 LARGE_NEGATIVE_CHANGE_KWH = 100.0
+COLLECTION_START_HOUR = 8
+COLLECTION_END_HOUR = 20
+COLLECTION_ROUND_TOTAL = COLLECTION_END_HOUR - COLLECTION_START_HOUR + 1
+
+# 后台排序参数只能映射到这里的固定 SQL，绝不直接拼接用户输入。
+EVENT_SORT_SQL = {
+    "time_desc": "ce.current_query_time DESC, ce.id DESC",
+    "time_asc": "ce.current_query_time ASC, ce.id ASC",
+    "building_asc": (
+        "ce.building_code ASC, floor_name ASC, room_name ASC, "
+        "ce.current_query_time DESC, ce.id DESC"
+    ),
+    "building_desc": (
+        "ce.building_code DESC, floor_name DESC, room_name DESC, "
+        "ce.current_query_time DESC, ce.id DESC"
+    ),
+    "recharge_amount_desc": (
+        "COALESCE(s.amount_yuan - ps.amount_yuan, 0) DESC, "
+        "ce.current_query_time DESC, ce.id DESC"
+    ),
+    "consumption_amount_desc": (
+        "COALESCE(ps.amount_yuan - s.amount_yuan, 0) DESC, "
+        "ce.current_query_time DESC, ce.id DESC"
+    ),
+    "balance_desc": (
+        "ABS(ce.delta_balance) DESC, ce.current_query_time DESC, ce.id DESC"
+    ),
+}
+EVENT_PAGE_SIZES = {100, 200, 500}
+EVENT_TYPES = {"充值", "用电消耗", "待确认"}
 
 
 def shanghai_now() -> dt.datetime:
@@ -66,6 +95,15 @@ def parse_iso(value: str) -> dt.datetime:
     if parsed.tzinfo is None:
         raise ValueError("时间必须包含时区")
     return parsed.astimezone(SHANGHAI)
+
+
+def _day_bounds(day: str) -> tuple[str, str]:
+    """返回上海自然日的半开区间；ISO 文本可直接使用事件时间索引比较。"""
+
+    parsed = dt.date.fromisoformat(day)
+    start = dt.datetime.combine(parsed, dt.time.min, tzinfo=SHANGHAI)
+    end = start + dt.timedelta(days=1)
+    return iso_shanghai(start), iso_shanghai(end)
 
 
 @dataclass(frozen=True)
@@ -196,6 +234,12 @@ class PublicHistoryStore:
 
                 CREATE INDEX IF NOT EXISTS idx_events_building_time
                     ON change_events(building_code, current_query_time);
+                CREATE INDEX IF NOT EXISTS idx_events_time_id
+                    ON change_events(current_query_time, id);
+                CREATE INDEX IF NOT EXISTS idx_events_room_time_id
+                    ON change_events(room_code, current_query_time, id);
+                CREATE INDEX IF NOT EXISTS idx_events_type_time_id
+                    ON change_events(inferred_type, current_query_time, id);
 
                 CREATE TABLE IF NOT EXISTS collector_metadata (
                     key TEXT PRIMARY KEY,
@@ -204,18 +248,15 @@ class PublicHistoryStore:
                 PRAGMA user_version = 1;
                 """
             )
-            # 1.1.0 分类迁移：旧规则对正负变化统一使用 100 度阈值，导致一次约百元充值
-            # （常见可增加 150～200 度）被误标为待确认。只迁移方向明确且低于新正向上限的
-            # 既有事件；房间码、采样、变化量和任务逻辑均不改写。
+            # 新分类规则中，余额正向变化统一视为充值。迁移只改显示分类，不改房间码、
+            # 原始采样值、变化量或任务记录，因此已有 App 历史数据仍可安全合并。
             connection.execute(
                 """
                 UPDATE change_events
-                SET inferred_type = '疑似充值或平台修正'
-                WHERE inferred_type = '待确认'
-                  AND delta_balance > 0
-                  AND delta_balance < ?
-                """,
-                (LARGE_POSITIVE_CHANGE_KWH,),
+                SET inferred_type = '充值'
+                WHERE delta_balance > 0
+                  AND inferred_type != '充值'
+                """
             )
 
     def metadata(self, key: str, fallback: str = "") -> str:
@@ -585,116 +626,330 @@ class PublicHistoryStore:
             "hasMore": has_more,
         }
 
-    def collector_overview(
-        self, day: str = "", building_code: str = "", room_code: str = ""
-    ) -> dict[str, Any]:
-        conditions: list[str] = []
-        values: list[Any] = []
-        if day:
-            conditions.append("substr(slot_time, 1, 10) = ?")
-            values.append(day)
-        if building_code:
-            conditions.append("building_code = ?")
-            values.append(building_code)
-        if room_code:
-            conditions.append("room_code = ?")
-            values.append(room_code)
-        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    def collector_task_overview(self) -> dict[str, Any]:
+        """读取实时任务总览；不接受分析日期，避免历史筛选污染当前任务状态。"""
 
         with self._connect() as connection:
             latest_job = connection.execute(
                 "SELECT * FROM collection_jobs ORDER BY slot_time DESC LIMIT 1"
             ).fetchone()
+            slot_time = str(latest_job["slot_time"]) if latest_job else ""
             building_rows = connection.execute(
                 """
-                SELECT building_code, building_name,
-                       SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS room_count,
-                       SUM(CASE WHEN active = 1 AND meter_available = 0 THEN 1 ELSE 0 END)
-                           AS no_meter_count
-                FROM rooms GROUP BY building_code, building_name
-                ORDER BY building_code
-                """
-            ).fetchall()
-            summary = connection.execute(
-                f"""
-                SELECT COUNT(*) AS total,
-                       SUM(CASE WHEN query_result = 'success' THEN 1 ELSE 0 END) AS success,
-                       SUM(CASE WHEN query_result != 'success' THEN 1 ELSE 0 END) AS failure
-                FROM samples{where}
+                WITH directory AS (
+                    SELECT building_code, building_name,
+                           SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS room_count,
+                           SUM(CASE WHEN active = 1 AND meter_available = 0 THEN 1 ELSE 0 END)
+                               AS no_meter_count
+                    FROM rooms GROUP BY building_code, building_name
+                ), current_round AS (
+                    SELECT building_code, COUNT(*) AS processed_count,
+                           SUM(CASE WHEN query_result = 'success' THEN 1 ELSE 0 END)
+                               AS success_count,
+                           SUM(CASE WHEN query_result != 'success' THEN 1 ELSE 0 END)
+                               AS failure_count
+                    FROM samples WHERE slot_time = ? GROUP BY building_code
+                )
+                SELECT d.*, COALESCE(c.processed_count, 0) AS processed_count,
+                       COALESCE(c.success_count, 0) AS success_count,
+                       COALESCE(c.failure_count, 0) AS failure_count
+                FROM directory d LEFT JOIN current_round c USING(building_code)
+                ORDER BY d.building_code
                 """,
-                values,
-            ).fetchone()
+                (slot_time,),
+            ).fetchall()
             failures = connection.execute(
-                f"""
-                SELECT COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS count
-                FROM samples{where + (' AND ' if where else ' WHERE ')}
-                    query_result != 'success'
-                GROUP BY error_type ORDER BY count DESC
+                """
+                SELECT COALESCE(error_type, 'unknown') AS error_type,
+                       building_code, building_name, COUNT(*) AS count
+                FROM samples
+                WHERE slot_time = ? AND query_result != 'success'
+                GROUP BY error_type, building_code, building_name
+                ORDER BY count DESC, building_code
                 """,
-                values,
-            ).fetchall()
+                (slot_time,),
+            ).fetchall() if slot_time else []
+            total_samples = int(connection.execute(
+                "SELECT COUNT(*) FROM samples"
+            ).fetchone()[0])
 
-            event_conditions: list[str] = []
-            if day:
-                event_conditions.append("substr(ce.current_query_time, 1, 10) = ?")
-            if building_code:
-                event_conditions.append("ce.building_code = ?")
-            if room_code:
-                event_conditions.append("ce.room_code = ?")
-            event_where = (
-                " WHERE " + " AND ".join(event_conditions) if event_conditions else ""
-            )
-            distributions = connection.execute(
-                f"""
-                SELECT substr(current_query_time, 12, 2) AS hour,
-                       inferred_type, COUNT(*) AS count
-                FROM change_events ce{event_where}
-                GROUP BY hour, inferred_type ORDER BY hour, inferred_type
+        building_list = [dict(row) for row in building_rows]
+        valid_rooms = sum(int(row["room_count"] or 0) for row in building_list)
+        no_meter = sum(int(row["no_meter_count"] or 0) for row in building_list)
+        current_building = "—"
+        if latest_job:
+            if str(latest_job["status"]) == "running":
+                processed = int(latest_job["processed_rooms"] or 0)
+                cumulative = 0
+                for row in building_list:
+                    cumulative += int(row["room_count"] or 0)
+                    if processed < cumulative:
+                        current_building = str(row["building_name"])
+                        break
+            else:
+                current_building = "本轮已完成"
+        return {
+            "latest_job": dict(latest_job) if latest_job else None,
+            "buildings": building_list,
+            "covered_buildings": sum(1 for row in building_list if row["room_count"]),
+            "valid_rooms": valid_rooms,
+            "no_meter_count": no_meter,
+            "current_building": current_building,
+            "total_samples": total_samples,
+            "failures": [dict(row) for row in failures],
+            "current_round": collection_round_number(slot_time),
+            "round_total": COLLECTION_ROUND_TOTAL,
+            "database_bytes": self.path.stat().st_size if self.path.exists() else 0,
+        }
+
+    def resolve_analysis_day(self, requested_day: str = "") -> str:
+        """默认今天；今天无变化事件时回退到最近一个存在事件的上海自然日。"""
+
+        today = shanghai_now().date().isoformat()
+        if requested_day:
+            return requested_day
+        with self._connect() as connection:
+            today_exists = connection.execute(
+                """
+                SELECT 1 FROM change_events
+                WHERE current_query_time >= ? AND current_query_time < ? LIMIT 1
                 """,
-                values,
-            ).fetchall()
-            recent_events = connection.execute(
+                _day_bounds(today),
+            ).fetchone()
+            if today_exists:
+                return today
+            latest = connection.execute(
+                "SELECT MAX(substr(current_query_time, 1, 10)) FROM change_events"
+            ).fetchone()[0]
+        return str(latest or today)
+
+    @staticmethod
+    def _event_filters(
+        day: str,
+        building_code: str,
+        room_code: str,
+        event_type: str,
+        interval_end_hour: int,
+        snapshot_id: int,
+    ) -> tuple[str, list[Any]]:
+        conditions: list[str] = []
+        values: list[Any] = []
+        if day:
+            start, end = _day_bounds(day)
+            conditions.extend([
+                "ce.current_query_time >= ?", "ce.current_query_time < ?"
+            ])
+            values.extend([start, end])
+        if building_code:
+            conditions.append("ce.building_code = ?")
+            values.append(building_code)
+        if room_code:
+            conditions.append("ce.room_code = ?")
+            values.append(room_code)
+        if event_type in EVENT_TYPES:
+            conditions.append("ce.inferred_type = ?")
+            values.append(event_type)
+        if 9 <= interval_end_hour <= 20:
+            conditions.append("substr(ce.current_query_time, 12, 2) = ?")
+            values.append(f"{interval_end_hour:02d}")
+        if snapshot_id > 0:
+            conditions.append("ce.id <= ?")
+            values.append(snapshot_id)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        return where, values
+
+    def collector_events(
+        self,
+        *,
+        day: str = "",
+        building_code: str = "",
+        room_code: str = "",
+        event_type: str = "",
+        interval_end_hour: int = 0,
+        event_sort: str = "time_desc",
+        page: int = 1,
+        page_size: int = 100,
+        snapshot_id: int = 0,
+    ) -> dict[str, Any]:
+        """稳定分页读取事件；snapshot_id 隔离浏览期间新插入的采集事件。"""
+
+        safe_sort = event_sort if event_sort in EVENT_SORT_SQL else "time_desc"
+        safe_size = page_size if page_size in EVENT_PAGE_SIZES else 100
+        # 两种金额排序本身就限定业务方向，避免与事件类型筛选组合出混合或矛盾结果。
+        effective_type = event_type if event_type in EVENT_TYPES else ""
+        if safe_sort == "recharge_amount_desc":
+            effective_type = "充值"
+        elif safe_sort == "consumption_amount_desc":
+            effective_type = "用电消耗"
+
+        base_where, base_values = self._event_filters(
+            day, building_code, room_code, effective_type,
+            interval_end_hour, 0,
+        )
+        with self._connect() as connection:
+            if snapshot_id <= 0:
+                snapshot_id = int(connection.execute(
+                    f"SELECT COALESCE(MAX(ce.id), 0) FROM change_events ce{base_where}",
+                    base_values,
+                ).fetchone()[0])
+            where, values = self._event_filters(
+                day, building_code, room_code, effective_type,
+                interval_end_hour, snapshot_id,
+            )
+            total = int(connection.execute(
+                f"SELECT COUNT(*) FROM change_events ce{where}", values
+            ).fetchone()[0])
+            total_pages = max(1, math.ceil(total / safe_size))
+            safe_page = min(max(1, page), total_pages)
+            offset = (safe_page - 1) * safe_size
+            rows = connection.execute(
                 f"""
                 SELECT ce.*,
                        COALESCE(NULLIF(s.floor_name, ''), NULLIF(r.floor_name, ''), '')
                            AS floor_name,
                        COALESCE(NULLIF(s.room_name, ''), NULLIF(r.room_name, ''), '')
-                           AS room_name
+                           AS room_name,
+                       s.amount_yuan AS after_amount,
+                       ps.amount_yuan AS before_amount,
+                       (s.amount_yuan - ps.amount_yuan) AS delta_amount
                 FROM change_events ce
                 LEFT JOIN samples s ON s.id = ce.current_sample_id
+                LEFT JOIN samples ps ON ps.id = ce.previous_sample_id
                 LEFT JOIN rooms r ON r.room_code = ce.room_code
-                {event_where}
-                ORDER BY ce.current_query_time DESC LIMIT 200
+                {where}
+                ORDER BY {EVENT_SORT_SQL[safe_sort]}
+                LIMIT ? OFFSET ?
+                """,
+                [*values, safe_size, offset],
+            ).fetchall()
+        return {
+            "events": [dict(row) for row in rows],
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_size,
+            "total_pages": total_pages,
+            "snapshot_id": snapshot_id,
+            "event_type": effective_type,
+            "sort": safe_sort,
+        }
+
+    def collector_distribution(
+        self,
+        day: str = "",
+        building_code: str = "",
+        room_code: str = "",
+    ) -> dict[str, Any]:
+        """按后一次采集小时聚合 08:00～20:00 的相邻轮次变化。"""
+
+        resolved_day = self.resolve_analysis_day(day)
+        where, values = self._event_filters(
+            resolved_day, building_code, room_code, "", 0, 0
+        )
+        with self._connect() as connection:
+            summary = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total_count,
+                       SUM(CASE WHEN ce.inferred_type = '充值' THEN 1 ELSE 0 END)
+                           AS recharge_count,
+                       SUM(CASE WHEN ce.inferred_type = '用电消耗' THEN 1 ELSE 0 END)
+                           AS consumption_count,
+                       SUM(CASE WHEN ce.inferred_type NOT IN ('充值', '用电消耗')
+                           THEN 1 ELSE 0 END) AS abnormal_count
+                FROM change_events ce{where}
+                """,
+                values,
+            ).fetchone()
+            rows = connection.execute(
+                f"""
+                SELECT CAST(substr(ce.current_query_time, 12, 2) AS INTEGER) AS end_hour,
+                       COUNT(*) AS total_count,
+                       SUM(CASE WHEN ce.inferred_type = '充值' THEN 1 ELSE 0 END)
+                           AS recharge_count,
+                       SUM(CASE WHEN ce.inferred_type = '用电消耗' THEN 1 ELSE 0 END)
+                           AS consumption_count,
+                       SUM(CASE WHEN ce.inferred_type NOT IN ('充值', '用电消耗')
+                           THEN 1 ELSE 0 END) AS abnormal_count,
+                       COALESCE(SUM(ce.delta_balance), 0) AS total_delta_kwh,
+                       COALESCE(SUM(s.amount_yuan - ps.amount_yuan), 0)
+                           AS total_delta_amount
+                FROM change_events ce
+                LEFT JOIN samples s ON s.id = ce.current_sample_id
+                LEFT JOIN samples ps ON ps.id = ce.previous_sample_id
+                {where}
+                GROUP BY end_hour ORDER BY end_hour
                 """,
                 values,
             ).fetchall()
-        total = int(summary["total"] or 0)
-        success = int(summary["success"] or 0)
+        lookup = {int(row["end_hour"]): dict(row) for row in rows}
+        intervals = []
+        for start_hour in range(COLLECTION_START_HOUR, COLLECTION_END_HOUR):
+            end_hour = start_hour + 1
+            row = lookup.get(end_hour, {})
+            intervals.append({
+                "start_hour": start_hour,
+                "end_hour": end_hour,
+                "total_count": int(row.get("total_count") or 0),
+                "recharge_count": int(row.get("recharge_count") or 0),
+                "consumption_count": int(row.get("consumption_count") or 0),
+                "abnormal_count": int(row.get("abnormal_count") or 0),
+                "total_delta_kwh": float(row.get("total_delta_kwh") or 0),
+                "total_delta_amount": float(row.get("total_delta_amount") or 0),
+            })
         return {
-            "latest_job": dict(latest_job) if latest_job else None,
-            "buildings": [dict(row) for row in building_rows],
-            "total": total,
-            "success": success,
-            "failure": int(summary["failure"] or 0),
-            "success_rate": success / total * 100 if total else 0.0,
-            "failures": [dict(row) for row in failures],
-            "distribution": [dict(row) for row in distributions],
-            "events": [dict(row) for row in recent_events],
-            "database_bytes": self.path.stat().st_size if self.path.exists() else 0,
+            "day": resolved_day,
+            "intervals": intervals,
+            "total": int(summary["total_count"] or 0),
+            "recharge": int(summary["recharge_count"] or 0),
+            "consumption": int(summary["consumption_count"] or 0),
+            "abnormal": int(summary["abnormal_count"] or 0),
         }
+
+    def collector_overview(
+        self,
+        day: str = "",
+        building_code: str = "",
+        room_code: str = "",
+        event_sort: str = "time_desc",
+    ) -> dict[str, Any]:
+        """兼容内部旧调用的组合视图；新页面使用三个独立查询避免相互拖累。"""
+
+        resolved_day = self.resolve_analysis_day(day)
+        result = self.collector_task_overview()
+        events = self.collector_events(
+            day=resolved_day, building_code=building_code,
+            room_code=room_code, event_sort=event_sort,
+        )
+        distribution = self.collector_distribution(
+            resolved_day, building_code, room_code
+        )
+        result.update(events)
+        result["distribution"] = distribution["intervals"]
+        result["analysis_day"] = resolved_day
+        return result
 
 
 def infer_change_type(delta: float) -> str:
     if delta > 0:
-        # 正向变化最常见原因是充值。电价约为每度数角时，充值百元带来 100～200 多度
-        # 完全合理，不能沿用负向异常的 100 度阈值；极端大于 1000 度仍保守待确认。
-        if delta >= LARGE_POSITIVE_CHANGE_KWH:
-            return "待确认"
-        return "疑似充值或平台修正"
+        # 校付宝余额只有发生充值后才会上涨，正向变化直接使用用户可理解的确定分类。
+        return "充值"
     # 一小时下降 100 度以上更可能是平台修正、表号变动或异常值，继续要求人工确认。
     if abs(delta) >= LARGE_NEGATIVE_CHANGE_KWH:
         return "待确认"
     return "用电消耗"
+
+
+def collection_round_number(slot_time: str) -> int:
+    """把 08:00～20:00 的任务时刻映射为第 1～13 轮，异常数据安全返回 0。"""
+
+    if not slot_time:
+        return 0
+    try:
+        hour = parse_iso(slot_time).hour
+    except (TypeError, ValueError):
+        return 0
+    if hour < COLLECTION_START_HOUR or hour > COLLECTION_END_HOUR:
+        return 0
+    return hour - COLLECTION_START_HOUR + 1
 
 
 class XiaofubaoClient:

@@ -34,16 +34,24 @@ try:
     # 作为 package 执行单元测试时使用相对导入；生产环境直接运行 server.py 时使用同目录导入。
     from .public_history import (
         CollectorScheduler,
+        EVENT_PAGE_SIZES,
+        EVENT_SORT_SQL,
+        EVENT_TYPES,
         PublicHistoryCollector,
         PublicHistoryStore,
         XiaofubaoClient,
+        parse_iso,
     )
 except ImportError:  # pragma: no cover - 生产脚本入口
     from public_history import (
         CollectorScheduler,
+        EVENT_PAGE_SIZES,
+        EVENT_SORT_SQL,
+        EVENT_TYPES,
         PublicHistoryCollector,
         PublicHistoryStore,
         XiaofubaoClient,
+        parse_iso,
     )
 
 
@@ -658,34 +666,59 @@ class Handler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     password_page(self.service.csrf_token(session)),
                 )
-        elif path == "/admin/collector":
+        elif path in {
+            "/admin/collector",
+            "/admin/collector/events",
+            "/admin/collector/distribution",
+        }:
             session = self._session_token()
             if not session:
                 self._redirect("/admin/login")
                 return
-            query = urllib.parse.parse_qs(
-                urllib.parse.urlsplit(self.path).query
-            )
-            day = query.get("date", [""])[0].strip()
-            building_code = query.get("buildingCode", [""])[0].strip()
-            room_code = query.get("roomCode", [""])[0].strip()
-            if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
-                day = ""
-            if building_code and not re.fullmatch(r"\d{9}", building_code):
-                building_code = ""
-            if room_code and not re.fullmatch(r"\d{15}", room_code):
-                room_code = ""
             try:
                 if self.service.public_history_store is None:
                     raise sqlite3.OperationalError("公共历史数据库暂不可用")
-                overview = self.service.public_history_store.collector_overview(
-                    day, building_code, room_code
+                parameters = _collector_parameters(self.path)
+                store = self.service.public_history_store
+                if path == "/admin/collector/events":
+                    event_page = store.collector_events(**parameters["events"])
+                    self._send_json(HTTPStatus.OK, {
+                        "html": collector_events_fragment(event_page),
+                        "page": event_page["page"],
+                        "pageSize": event_page["page_size"],
+                        "total": event_page["total"],
+                        "totalPages": event_page["total_pages"],
+                        "snapshotId": event_page["snapshot_id"],
+                        "eventType": event_page["event_type"],
+                    })
+                    return
+                if path == "/admin/collector/distribution":
+                    distribution = store.collector_distribution(
+                        parameters["day"], parameters["building_code"],
+                        parameters["room_code"],
+                    )
+                    self._send_json(HTTPStatus.OK, {
+                        "html": collector_distribution_fragment(
+                            distribution, parameters["interval_end_hour"]
+                        ),
+                        "date": distribution["day"],
+                    })
+                    return
+
+                task = store.collector_task_overview()
+                distribution = store.collector_distribution(
+                    parameters["day"], parameters["building_code"],
+                    parameters["room_code"],
                 )
-                self._send_html(
-                    HTTPStatus.OK,
-                    collector_page(overview, day, building_code, room_code),
-                )
-            except sqlite3.Error as exception:
+                # 首次进入没有指定日期时，事件列表与分布统一使用已解析出的有效日期。
+                if not parameters["day"]:
+                    parameters["day"] = distribution["day"]
+                    parameters["events"]["day"] = distribution["day"]
+                event_page = store.collector_events(**parameters["events"])
+                self._send_html(HTTPStatus.OK, collector_page(
+                    task, event_page, distribution, parameters
+                ))
+            except (sqlite3.Error, ValueError) as exception:
                 self._send_html(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                     error_page("云端采集数据读取失败", str(exception)),
@@ -1020,8 +1053,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send_bytes(status, body, "application/json; charset=utf-8")
 
     def _send_html(self, status: HTTPStatus, body: str) -> None:
+        # 后台默认禁止脚本。云端采集页需要少量原生脚本完成局部分页与筛选，
+        # 因此只把当前响应中实际存在的内联脚本摘要加入 CSP 白名单；不开放
+        # unsafe-inline，也不允许第三方脚本来源。
+        script_hashes = tuple(
+            "'sha256-" + base64.b64encode(
+                hashlib.sha256(script.encode("utf-8")).digest()
+            ).decode("ascii") + "'"
+            for script in re.findall(r"<script>(.*?)</script>", body, re.DOTALL)
+        )
         self._send_bytes(
-            status, body.encode("utf-8"), "text/html; charset=utf-8", admin=True
+            status, body.encode("utf-8"), "text/html; charset=utf-8", admin=True,
+            script_hashes=script_hashes,
         )
 
     def _send_bytes(
@@ -1032,9 +1075,10 @@ class Handler(BaseHTTPRequestHandler):
         *,
         admin: bool = False,
         content_encoding: str | None = None,
+        script_hashes: tuple[str, ...] = (),
     ) -> None:
         self.send_response(status)
-        self._security_headers(admin=admin)
+        self._security_headers(admin=admin, script_hashes=script_hashes)
         if content_type:
             self.send_header("Content-Type", content_type)
         if content_encoding:
@@ -1045,16 +1089,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD" and body:
             self.wfile.write(body)
 
-    def _security_headers(self, *, admin: bool) -> None:
+    def _security_headers(
+        self, *, admin: bool, script_hashes: tuple[str, ...] = ()
+    ) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         if admin:
             self.send_header("Cache-Control", "no-store")
+            script_policy = (
+                " script-src " + " ".join(script_hashes) + ";"
+                if script_hashes else ""
+            )
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'none'; style-src 'unsafe-inline'; "
-                "form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+                f"form-action 'self'; connect-src 'self';{script_policy} base-uri 'none'; "
+                "frame-ancestors 'none'",
             )
 
     def log_message(self, format_text: str, *args: Any) -> None:
@@ -1274,131 +1325,565 @@ def _metric(label: str, value: Any, detail: str) -> str:
     )
 
 
+def _collector_parameters(path_with_query: str) -> dict[str, Any]:
+    """统一解析后台筛选参数；所有可进入 SQL 的枚举仍由固定白名单控制。"""
+
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path_with_query).query)
+    day = query.get("date", [""])[0].strip()
+    if day:
+        try:
+            dt.date.fromisoformat(day)
+        except ValueError:
+            day = ""
+    building_code = query.get("buildingCode", [""])[0].strip()
+    room_code = query.get("roomCode", [""])[0].strip()
+    if building_code and not re.fullmatch(r"\d{9}", building_code):
+        building_code = ""
+    if room_code and not re.fullmatch(r"\d{15}", room_code):
+        room_code = ""
+    event_type = query.get("eventType", [""])[0].strip()
+    if event_type not in EVENT_TYPES:
+        event_type = ""
+    event_sort = query.get("sort", ["time_desc"])[0].strip()
+    if event_sort not in EVENT_SORT_SQL:
+        event_sort = "time_desc"
+    # 页大小只接受界面公开的三个档位。不能先把任意大数截断为 500，
+    # 否则非法输入会被误认为合法的 500 条选项。
+    page_size = _bounded_int(query.get("pageSize", ["100"])[0], 100, 1, 1_000_000)
+    if page_size not in EVENT_PAGE_SIZES:
+        page_size = 100
+    interval_end = _bounded_int(query.get("intervalEnd", ["0"])[0], 0, 0, 20)
+    if interval_end not in range(9, 21):
+        interval_end = 0
+    page = _bounded_int(query.get("page", ["1"])[0], 1, 1, 1_000_000)
+    snapshot_id = _bounded_int(
+        query.get("snapshot", ["0"])[0], 0, 0, 2_147_483_647
+    )
+    return {
+        "day": day,
+        "building_code": building_code,
+        "room_code": room_code,
+        "event_type": event_type,
+        "event_sort": event_sort,
+        "page_size": page_size,
+        "interval_end_hour": interval_end,
+        "events": {
+            "day": day,
+            "building_code": building_code,
+            "room_code": room_code,
+            "event_type": event_type,
+            "interval_end_hour": interval_end,
+            "event_sort": event_sort,
+            "page": page,
+            "page_size": page_size,
+            "snapshot_id": snapshot_id,
+        },
+    }
+
+
+def _bounded_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        return min(maximum, max(minimum, int(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def collector_page(
-    overview: dict[str, Any],
-    day: str,
-    building_code: str,
-    room_code: str,
+    task: dict[str, Any],
+    event_page: dict[str, Any],
+    distribution: dict[str, Any],
+    parameters: dict[str, Any],
 ) -> str:
-    """云端采集后台；所有变化时间均明确展示为相邻查询之间的发生区间。"""
+    """单页采集控制台：实时任务、可分页事件和按日时段分析相互独立。"""
 
-    latest = overview["latest_job"]
-    if latest:
-        progress = (
-            f'{int(latest["processed_rooms"])}/{int(latest["total_rooms"])}'
+    building_options = '<option value="">全部楼栋</option>' + "".join(
+        f'<option value="{html.escape(str(row["building_code"]))}"'
+        f'{" selected" if parameters["building_code"] == row["building_code"] else ""}>'
+        f'{html.escape(str(row["building_name"]))}</option>'
+        for row in task["buildings"]
+    )
+    event_type_options = "".join(
+        f'<option value="{html.escape(value)}"'
+        f'{" selected" if event_page["event_type"] == value else ""}>'
+        f'{html.escape(label)}</option>'
+        for value, label in (
+            ("", "全部类型"), ("充值", "充值"),
+            ("用电消耗", "用电消耗"), ("待确认", "待确认"),
         )
-        duration = (
-            f'{float(latest["duration_seconds"]):.1f} 秒'
-            if latest["duration_seconds"] is not None else "执行中"
+    )
+    sort_options = "".join(
+        f'<option value="{value}"'
+        f'{" selected" if event_page["sort"] == value else ""}>'
+        f'{html.escape(label)}</option>'
+        for value, label in (
+            ("time_desc", "时间：最新优先"),
+            ("time_asc", "时间：最早优先"),
+            ("building_asc", "楼栋：正序"),
+            ("building_desc", "楼栋：倒序"),
+            ("recharge_amount_desc", "充值金额：由高到低（仅充值）"),
+            ("consumption_amount_desc", "消耗金额：由高到低（仅消耗）"),
+            ("balance_desc", "电量变化：由大到小"),
         )
-        latest_html = f"""
-        <dl>
-          <dt>轮次</dt><dd>{html.escape(str(latest["slot_time"]))}</dd>
-          <dt>状态</dt><dd>{html.escape(str(latest["status"]))}</dd>
-          <dt>进度</dt><dd>{progress}</dd>
-          <dt>成功 / 失败</dt><dd>{int(latest["success_count"])} / {int(latest["failure_count"])}</dd>
-          <dt>耗时</dt><dd>{duration}</dd>
-          <dt>最近错误</dt><dd>{html.escape(str(latest["last_error_type"] or "无"))}</dd>
-        </dl>
-        """
-    else:
-        latest_html = '<p class="muted">尚无采集任务</p>'
-
-    building_rows = "".join(
-        f"""
-        <tr><td>{html.escape(str(row["building_name"]))}</td>
-        <td class="mono">{html.escape(str(row["building_code"]))}</td>
-        <td>{int(row["room_count"] or 0)}</td>
-        <td>{int(row["no_meter_count"] or 0)}</td></tr>
-        """
-        for row in overview["buildings"]
-    ) or '<tr><td colspan="4" class="muted">尚未同步房间目录</td></tr>'
-    failure_rows = "".join(
-        f"<tr><td>{html.escape(str(row['error_type']))}</td><td>{int(row['count'])}</td></tr>"
-        for row in overview["failures"]
-    ) or '<tr><td colspan="2" class="muted">筛选范围内无失败</td></tr>'
-    distribution_rows = "".join(
-        f"<tr><td>{html.escape(str(row['hour']))}:00–下一次查询</td>"
-        f"<td>{html.escape(str(row['inferred_type']))}</td><td>{int(row['count'])}</td></tr>"
-        for row in overview["distribution"]
-    ) or '<tr><td colspan="3" class="muted">筛选范围内暂无余额变化</td></tr>'
-    event_rows = "".join(
-        f"""
-        <tr>
-          <td colspan="2"><strong>{html.escape(
-              " · ".join(part for part in (
-                  str(row.get("building_name") or ""),
-                  str(row.get("floor_name") or ""),
-                  str(row.get("room_name") or ""),
-              ) if part) or str(row["room_code"])
-          )}</strong><br>
-          <span class="muted mono" title="房间码">{html.escape(str(row["room_code"]))}</span></td>
-          <td>{html.escape(str(row["previous_query_time"]))}<br>至<br>
-              {html.escape(str(row["current_query_time"]))}</td>
-          <td>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f}</td>
-          <td>{float(row["delta_balance"]):+.2f}</td>
-          <td>{html.escape(str(row["inferred_type"]))}</td>
-        </tr>
-        """
-        for row in overview["events"]
-    ) or '<tr><td colspan="6" class="muted">筛选范围内暂无变化事件</td></tr>'
-
+    )
+    page_size_options = "".join(
+        f'<option value="{size}"'
+        f'{" selected" if event_page["page_size"] == size else ""}>{size} 条</option>'
+        for size in (100, 200, 500)
+    )
     return page_shell(
         "云端采集",
         f"""
-        <header class="topbar">
+        <header class="topbar" id="page-top">
           <div><div class="eyebrow">PUBLIC HISTORY</div><h1>云端采集</h1>
-          <p class="muted">公共房间采样 · Asia/Shanghai · 仅保留最近 30 天</p></div>
+          <p class="muted">公共房间采样 · Asia/Shanghai · 最近 30 天</p></div>
           <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
         </header>
-        <main>
-          <section class="filter-panel panel">
-            <form method="get" action="/admin/collector" class="filters">
-              <label>日期<input name="date" type="date" value="{html.escape(day)}"></label>
-              <label>楼栋代码<input name="buildingCode" inputmode="numeric" maxlength="9"
-                value="{html.escape(building_code)}" placeholder="9 位代码"></label>
-              <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
-                value="{html.escape(room_code)}" placeholder="15 位代码"></label>
-              <button type="submit">筛选</button>
-              <a class="secondary" href="/admin/collector">清除</a>
-            </form>
+        <main class="collector-main">
+          <div class="collector-workspace">
+            <div class="collector-left-column">
+              {collector_task_fragment(task)}
+              <section class="panel distribution-panel" id="distribution-section">
+                <div id="distribution-results">
+                  {collector_distribution_fragment(
+                      distribution, parameters["interval_end_hour"]
+                  )}
+                </div>
+              </section>
+            </div>
+            <section class="panel events-panel" id="events-section">
+            <div class="section-heading"><div><div class="eyebrow">CHANGE EVENTS</div>
+              <h2>最近变化事件</h2><p class="muted">最近30天 · 分页查询</p></div></div>
+            <details class="event-filter-drawer">
+              <summary>筛选与排序</summary>
+              <form id="event-filter-form" class="filters event-filters">
+                <label>日期<input id="event-date" name="date" type="date"
+                  value="{html.escape(distribution["day"])}"></label>
+                <label>楼栋<select name="buildingCode">{building_options}</select></label>
+                <label>房间码<input name="roomCode" inputmode="numeric" maxlength="15"
+                  value="{html.escape(parameters["room_code"])}" placeholder="15 位房间码"></label>
+                <label>事件类型<select name="eventType">{event_type_options}</select></label>
+                <label>排序<select name="sort">{sort_options}</select></label>
+                <label>每页<select name="pageSize">{page_size_options}</select></label>
+                <input name="intervalEnd" type="hidden" value="{parameters["interval_end_hour"]}">
+                <input name="snapshot" type="hidden" value="{event_page["snapshot_id"]}">
+                <input name="page" type="hidden" value="{event_page["page"]}">
+                <button type="submit">应用筛选</button>
+                <button class="secondary" id="clear-event-filters" type="button">清除</button>
+              </form>
+            </details>
+            <div id="event-loading" class="local-loading" hidden>正在加载变化事件…</div>
+            <div id="events-results" aria-live="polite">
+              {collector_events_fragment(event_page)}
+            </div>
+            </section>
+          </div>
+          <section class="data-note">
+            <strong>数据说明</strong>
+            <span>服务器只保留最近 30 天公共房间采样；数据库当前占用
+              {_format_bytes(int(task["database_bytes"]))}。用户备注、提醒和充值记录仍只保存在手机。</span>
           </section>
-          <section class="metric-grid collector-metrics">
-            {_metric("样本总数", overview["total"], "当前筛选范围")}
-            {_metric("成功样本", overview["success"], "可供 App 合并")}
-            {_metric("失败样本", overview["failure"], "保留分类，不含原始响应")}
-            {_metric("成功率", f'{overview["success_rate"]:.2f}%', "成功 / 全部请求")}
-            {_metric("历史数据库", _format_bytes(int(overview["database_bytes"])), "SQLite 文件")}
-          </section>
-          <section class="two-column">
-            <article class="panel"><div class="panel-title"><h2>最近任务</h2></div>{latest_html}</article>
-            <article class="panel"><div class="panel-title"><h2>各楼栋房间数</h2></div>
-              <div class="table-wrap"><table><thead><tr><th>楼栋</th><th>代码</th>
-              <th>有效房间</th><th>无电表</th></tr></thead><tbody>{building_rows}</tbody></table></div>
-            </article>
-          </section>
-          <section class="two-column">
-            <article class="panel"><div class="panel-title"><h2>失败原因</h2></div>
-              <table><thead><tr><th>分类</th><th>次数</th></tr></thead>
-              <tbody>{failure_rows}</tbody></table>
-            </article>
-            <article class="panel"><div class="panel-title"><h2>变化时段分布</h2></div>
-              <p class="muted panel-help">整点采样无法确定平台真实更新时间，仅统计变化发生区间。</p>
-              <table><thead><tr><th>查询区间</th><th>推测类型</th><th>次数</th></tr></thead>
-              <tbody>{distribution_rows}</tbody></table>
-            </article>
-          </section>
-          <section class="panel" style="margin-top:16px">
-            <div class="panel-title"><div><h2>最近变化事件</h2>
-              <p class="muted">最多显示 200 条；时间表示相邻两次查询之间。</p></div></div>
-            <div class="table-wrap"><table><thead><tr><th colspan="2">房间</th>
-              <th>变化发生区间</th><th>余额</th><th>变化量</th><th>推测类型</th></tr></thead>
-              <tbody>{event_rows}</tbody></table></div>
-          </section>
+          <button class="back-to-top secondary" id="back-to-top" type="button">回到顶部</button>
         </main>
-        <footer>云端仅保存公共房间采样；用户备注、提醒和充值数据只保存在用户手机</footer>
+        <footer>江理电费管家 · 云端公共采样控制台</footer>
+        {_collector_script()}
         """,
     )
+
+
+def collector_task_fragment(task: dict[str, Any]) -> str:
+    latest = task["latest_job"]
+    if not latest:
+        return '<section class="panel task-card"><p class="muted">尚无采集任务</p></section>'
+    total = int(latest["total_rooms"] or 0)
+    processed = int(latest["processed_rooms"] or 0)
+    success = int(latest["success_count"] or 0)
+    failure = int(latest["failure_count"] or 0)
+    progress_percent = min(100.0, processed / total * 100 if total else 0.0)
+    success_rate = success / processed * 100 if processed else 0.0
+    duration = (
+        f'{float(latest["duration_seconds"]):.1f} 秒'
+        if latest["duration_seconds"] is not None else "执行中"
+    )
+    status = {"running": "采集中", "completed": "已完成", "failed": "异常结束"}.get(
+        str(latest["status"]), str(latest["status"])
+    )
+    status_class = "status-ok" if failure == 0 else "status-warning"
+    statistics = "".join(
+        f'<div class="stat-item"><span>{html.escape(label)}</span>'
+        f'<strong>{html.escape(str(value))}</strong></div>'
+        for label, value in (
+            ("当前轮数", f'{task["current_round"] or "—"} / {task["round_total"]}'),
+            ("样本总数", task["total_samples"]),
+            ("成功样本", success), ("失败样本", failure),
+            ("成功率", f"{success_rate:.2f}%"),
+            ("数据库占用", _format_bytes(int(task["database_bytes"]))),
+            ("本轮耗时", duration),
+        )
+    )
+    show_no_meter = int(task["no_meter_count"]) > 0
+    building_rows = "".join(
+        f"""
+        <tr><td><strong>{html.escape(str(row["building_name"]))}</strong></td>
+        <td class="mono">{html.escape(str(row["building_code"]))}</td>
+        <td>{int(row["room_count"] or 0)}</td>
+        <td>{int(row["success_count"] or 0)}</td>
+        <td>{int(row["failure_count"] or 0)}</td>
+        <td>{int(row["processed_count"] or 0)} / {int(row["room_count"] or 0)}</td>
+        {f'<td>{int(row["no_meter_count"] or 0)}</td>' if show_no_meter else ''}</tr>
+        """ for row in task["buildings"]
+    ) or '<tr><td colspan="6" class="muted">尚未同步房间目录</td></tr>'
+    failure_html = ""
+    if task["failures"]:
+        failure_rows = "".join(
+            f'<tr><td>{html.escape(str(row["error_type"]))}</td>'
+            f'<td>{html.escape(str(row["building_name"]))}</td>'
+            f'<td>{int(row["count"])}</td></tr>' for row in task["failures"]
+        )
+        failure_html = f"""
+        <details class="expandable failure-expand">
+          <summary class="failure-summary">
+            <div><strong>本轮出现 {failure} 次失败</strong><span>失败详情仅在有异常时显示。</span></div>
+            <span class="summary-action"><span class="when-closed">查看失败详情</span><span class="when-open">收起失败详情</span></span>
+          </summary>
+          <div class="expandable-content">
+          <table><thead><tr><th>失败类型</th><th>楼栋</th><th>数量</th></tr></thead>
+          <tbody>{failure_rows}</tbody></table>
+          </div>
+        </details>"""
+    finished_at = latest["finished_at"] or latest["started_at"]
+    return f"""
+    <section class="panel task-card">
+      <div class="task-head">
+        <div><div class="eyebrow">CURRENT COLLECTION</div><h2>当前采集任务</h2>
+          <p class="muted">任务时间 {html.escape(_compact_time(str(latest["slot_time"])))}</p></div>
+        <span class="status-label {status_class}">{html.escape(status)}</span>
+      </div>
+      <div class="task-primary">
+        <div class="round-display"><span>当前轮次</span>
+          <strong>第 {task["current_round"] or "—"} / {task["round_total"]} 轮</strong></div>
+        <div class="task-meta"><span>开始 / 最近完成</span>
+          <strong>{html.escape(_compact_time(str(finished_at)))}</strong>
+          <small>当前处理：{html.escape(str(task["current_building"]))}</small></div>
+      </div>
+      <div class="progress-summary"><div><span>本轮进度</span><strong>{processed} / {total}</strong></div>
+        <div class="progress-track"><span style="width:{progress_percent:.2f}%"></span></div>
+      </div>
+      <div class="stats-strip">{statistics}</div>
+      <details class="expandable coverage-expand">
+        <summary class="coverage-summary">
+          <div><strong>已覆盖 {task["covered_buildings"]} 栋楼</strong>
+            <span>{task["valid_rooms"]} 个有效房间 · 已处理 {processed} 个</span></div>
+          <span class="summary-action"><span class="when-closed">展开楼栋详情</span><span class="when-open">收起楼栋详情</span></span>
+        </summary>
+        <div class="expandable-content table-wrap">
+          <table class="coverage-table"><thead><tr><th>楼栋</th><th>代码</th><th>有效房间</th>
+            <th>本轮成功</th><th>本轮失败</th><th>当前进度</th>
+            {'<th>无电表</th>' if show_no_meter else ''}</tr></thead><tbody>{building_rows}</tbody></table>
+        </div>
+      </details>
+      {failure_html}
+    </section>"""
+
+
+def collector_events_fragment(event_page: dict[str, Any]) -> str:
+    rows = "".join(_event_row_html(row) for row in event_page["events"])
+    if not rows:
+        rows = '<div class="empty-state">当前条件下暂无变化事件</div>'
+    previous_disabled = " disabled" if event_page["page"] <= 1 else ""
+    next_disabled = " disabled" if event_page["page"] >= event_page["total_pages"] else ""
+    return f"""
+      <div class="events-meta"><strong>共 {event_page["total"]} 条</strong>
+        <span>第 {event_page["page"]} / {event_page["total_pages"]} 页</span></div>
+      <div class="event-scroll"><div class="event-list">{rows}</div></div>
+      <nav class="pagination" aria-label="事件分页">
+        <button class="secondary" type="button" data-event-page="{event_page["page"] - 1}"{previous_disabled}>上一页</button>
+        <span>第 {event_page["page"]} 页 · 每页 {event_page["page_size"]} 条</span>
+        <button class="secondary" type="button" data-event-page="{event_page["page"] + 1}"{next_disabled}>下一页</button>
+      </nav>"""
+
+
+def _event_row_html(row: dict[str, Any]) -> str:
+    room_name = " · ".join(part for part in (
+        str(row.get("building_name") or ""), str(row.get("floor_name") or ""),
+        str(row.get("room_name") or ""),
+    ) if part) or str(row["room_code"])
+    date_text, interval_text = _event_date_and_interval(
+        str(row["previous_query_time"]), str(row["current_query_time"])
+    )
+    return f"""
+      <article class="event-row">
+        <div class="event-row-head"><strong>{html.escape(room_name)}</strong>
+          <span class="event-type">{html.escape(str(row["inferred_type"]))}</span></div>
+        <div class="event-row-sub"><span>{html.escape(date_text)} · {html.escape(interval_text)}</span>
+          <span class="mono">{html.escape(str(row["room_code"]))}</span></div>
+        <div class="event-row-values">
+          <span><small>余额</small>{float(row["before_balance"]):.2f} → {float(row["after_balance"]):.2f} 度</span>
+          <span><small>变化</small><strong>{float(row["delta_balance"]):+.2f} 度</strong></span>
+          <span><small>金额</small>{_format_delta_amount(row.get("delta_amount"))}</span>
+        </div>
+      </article>"""
+
+
+def collector_distribution_fragment(
+    distribution: dict[str, Any], selected_end_hour: int = 0
+) -> str:
+    max_count = max(
+        (int(row["total_count"]) for row in distribution["intervals"]), default=0
+    )
+    interval_rows = "".join(
+        _distribution_interval_html(row, max_count, selected_end_hour)
+        for row in distribution["intervals"]
+    )
+    return f"""
+      <div class="section-heading distribution-heading"><div>
+        <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2>
+        <p class="muted">各时段监测到余额发生变化的房间数量。</p></div>
+        <div class="date-nav"><button class="secondary" type="button" data-day-step="-1">上一天</button>
+          <input id="distribution-date" type="date" value="{html.escape(distribution["day"])}">
+          <button class="secondary" type="button" data-day-step="1">下一天</button>
+          <button class="secondary" id="distribution-today" type="button">今天</button></div>
+      </div>
+      <div class="distribution-summary">
+        <span><strong>{distribution["total"]}</strong> 总变化</span>
+        <span><strong>{distribution["recharge"]}</strong> 充值</span>
+        <span><strong>{distribution["consumption"]}</strong> 消耗</span>
+      </div>
+      <div class="interval-list">{interval_rows}</div>"""
+
+
+def _distribution_interval_html(
+    row: dict[str, Any], max_count: int, selected_end_hour: int
+) -> str:
+    count = int(row["total_count"])
+    width = count / max_count * 100 if max_count else 0
+    recharge = int(row["recharge_count"])
+    consumption = int(row["consumption_count"])
+    recharge_share = recharge / count * 100 if count else 0
+    consumption_share = consumption / count * 100 if count else 0
+    selected = " selected" if selected_end_hour == int(row["end_hour"]) else ""
+    abnormal = " has-abnormal" if int(row["abnormal_count"]) else ""
+    return f"""
+      <button class="interval-card{selected}{abnormal}" type="button"
+        data-interval-end="{int(row["end_hour"])}">
+        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]):02d}:00</strong>
+        <div class="interval-visual"><div class="interval-track"><div class="interval-fill" style="width:{width:.2f}%">
+          <span class="consumption-segment" style="width:{consumption_share:.2f}%"></span>
+          <span class="recharge-segment" style="width:{recharge_share:.2f}%"></span>
+        </div></div></div>
+        <div class="interval-counts"><strong>{count}</strong>
+          <span>消耗 {consumption}</span><span>充值 {recharge}</span></div>
+      </button>"""
+
+
+def _compact_time(value: str) -> str:
+    """后台任务时刻使用上海本地紧凑格式，解析失败时保留原值便于排查。"""
+
+    try:
+        return parse_iso(value).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return value
+
+
+def _event_interval(previous: str, current: str) -> str:
+    """把冗长 ISO 时间改为用户可直接理解的日期与起止时间。"""
+
+    try:
+        start = parse_iso(previous)
+        end = parse_iso(current)
+    except (TypeError, ValueError):
+        return f"{previous}–{current}"
+    if start.date() == end.date():
+        return f'{start:%Y-%m-%d} · {start:%H:%M}–{end:%H:%M}'
+    return f'{start:%m-%d %H:%M}–{end:%m-%d %H:%M}'
+
+
+def _event_date_and_interval(previous: str, current: str) -> tuple[str, str]:
+    """事件表将日期和区间拆列，避免窄屏中一段长时间文本挤压其他数据。"""
+
+    try:
+        start = parse_iso(previous)
+        end = parse_iso(current)
+    except (TypeError, ValueError):
+        return "—", f"{previous}–{current}"
+    date_text = end.strftime("%Y-%m-%d")
+    if start.date() == end.date():
+        return date_text, f"{start:%H:%M}–{end:%H:%M}"
+    return date_text, f"{start:%m-%d %H:%M}–{end:%m-%d %H:%M}"
+
+
+def _collector_script() -> str:
+    """局部刷新事件和分布区域；实时任务卡片不会因筛选或分页被重新加载。"""
+
+    return r"""
+    <script>
+    (() => {
+      const form = document.getElementById('event-filter-form');
+      const results = document.getElementById('events-results');
+      const loading = document.getElementById('event-loading');
+      const distribution = document.getElementById('distribution-results');
+      if (!form || !results || !distribution) return;
+
+      const field = (name) => form.elements.namedItem(name);
+      const params = () => {
+        const query = new URLSearchParams();
+        ['date','buildingCode','roomCode','eventType','sort','pageSize',
+         'intervalEnd','snapshot','page'].forEach((name) => {
+          query.set(name, field(name).value || '');
+        });
+        return query;
+      };
+      const localToday = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      const shiftDay = (value, offset) => {
+        const date = new Date(`${value}T12:00:00`);
+        date.setDate(date.getDate() + offset);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      const syncAmountType = () => {
+        if (field('sort').value === 'recharge_amount_desc') field('eventType').value = '充值';
+        if (field('sort').value === 'consumption_amount_desc') field('eventType').value = '用电消耗';
+      };
+      const updateAddress = (overrides = {}) => {
+        const query = params();
+        Object.entries(overrides).forEach(([name, value]) => query.set(name, value || ''));
+        history.replaceState(null, '', `/admin/collector?${query.toString()}`);
+      };
+
+      async function loadEvents(page = 1, resetSnapshot = false) {
+        syncAmountType();
+        field('page').value = String(page);
+        if (resetSnapshot) field('snapshot').value = '0';
+        loading.hidden = false;
+        results.classList.add('is-loading');
+        try {
+          const response = await fetch(`/admin/collector/events?${params().toString()}`, {
+            headers: {'Accept': 'application/json'}
+          });
+          if (!response.ok) throw new Error('request failed');
+          const payload = await response.json();
+          results.innerHTML = payload.html;
+          field('page').value = String(payload.page);
+          field('pageSize').value = String(payload.pageSize);
+          field('snapshot').value = String(payload.snapshotId);
+          field('eventType').value = payload.eventType || '';
+          updateAddress({eventType: payload.eventType});
+        } catch (_) {
+          results.innerHTML = '<div class="empty-state error-state">变化事件加载失败，请稍后重试。</div>';
+        } finally {
+          loading.hidden = true;
+          results.classList.remove('is-loading');
+        }
+      }
+
+      async function loadDistribution(day) {
+        const query = new URLSearchParams();
+        query.set('date', day);
+        query.set('buildingCode', field('buildingCode').value);
+        query.set('roomCode', field('roomCode').value);
+        query.set('intervalEnd', field('intervalEnd').value);
+        distribution.classList.add('is-loading');
+        try {
+          const response = await fetch(`/admin/collector/distribution?${query.toString()}`, {
+            headers: {'Accept': 'application/json'}
+          });
+          if (!response.ok) throw new Error('request failed');
+          const payload = await response.json();
+          distribution.innerHTML = payload.html;
+          field('date').value = payload.date;
+          bindDistributionControls();
+        } catch (_) {
+          distribution.innerHTML = '<div class="empty-state error-state">时段分布加载失败，请稍后重试。</div>';
+        } finally {
+          distribution.classList.remove('is-loading');
+        }
+      }
+
+      async function changeAnalysisDay(day) {
+        field('date').value = day;
+        field('intervalEnd').value = '0';
+        await Promise.all([loadEvents(1, true), loadDistribution(day)]);
+      }
+
+      // 分布区域会被局部替换，替换后需要重新绑定按钮。使用直接监听可避免
+      // 某些移动浏览器对 document 级事件代理处理不一致的问题。
+      function bindDistributionControls() {
+        distribution.querySelectorAll('[data-interval-end]').forEach((interval) => {
+          interval.addEventListener('click', () => {
+            const selected = String(interval.dataset.intervalEnd);
+            field('intervalEnd').value = field('intervalEnd').value === selected ? '0' : selected;
+            distribution.querySelectorAll('[data-interval-end]').forEach((item) => {
+              item.classList.toggle('selected', field('intervalEnd').value === String(item.dataset.intervalEnd));
+            });
+            loadEvents(1, true);
+            document.getElementById('events-section').scrollIntoView({behavior:'smooth', block:'start'});
+          });
+        });
+        distribution.querySelectorAll('[data-day-step]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const input = document.getElementById('distribution-date');
+            changeAnalysisDay(shiftDay(input.value, Number(button.dataset.dayStep)));
+          });
+        });
+        const dateInput = document.getElementById('distribution-date');
+        if (dateInput) dateInput.addEventListener('change', () => changeAnalysisDay(dateInput.value));
+        const todayButton = document.getElementById('distribution-today');
+        if (todayButton) todayButton.addEventListener('click', () => changeAnalysisDay(localToday()));
+      }
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        field('intervalEnd').value = '0';
+        Promise.all([loadEvents(1, true), loadDistribution(field('date').value)]);
+      });
+      field('sort').addEventListener('change', syncAmountType);
+      field('eventType').addEventListener('change', () => {
+        if (field('sort').value === 'recharge_amount_desc' && field('eventType').value !== '充值') {
+          field('sort').value = 'time_desc';
+        }
+        if (field('sort').value === 'consumption_amount_desc' && field('eventType').value !== '用电消耗') {
+          field('sort').value = 'time_desc';
+        }
+      });
+      document.getElementById('clear-event-filters').addEventListener('click', () => {
+        field('date').value = localToday();
+        field('buildingCode').value = '';
+        field('roomCode').value = '';
+        field('eventType').value = '';
+        field('sort').value = 'time_desc';
+        field('pageSize').value = '100';
+        field('intervalEnd').value = '0';
+        Promise.all([loadEvents(1, true), loadDistribution(field('date').value)]);
+      });
+      results.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-event-page]');
+        if (!button || button.disabled) return;
+        loadEvents(Number(button.dataset.eventPage), false);
+      });
+      bindDistributionControls();
+      const backToTop = document.getElementById('back-to-top');
+      backToTop.addEventListener('click', () => {
+        document.getElementById('page-top').scrollIntoView({behavior:'smooth'});
+      });
+      window.addEventListener('scroll', () => {
+        backToTop.classList.toggle('visible', window.scrollY > 520);
+      }, {passive:true});
+    })();
+    </script>
+    """
+
+
+def _format_delta_amount(value: Any) -> str:
+    if value is None:
+        return '<span class="muted">—</span>'
+    return f"{float(value):+.2f} 元"
 
 
 def _format_bytes(value: int) -> str:
@@ -1471,6 +1956,8 @@ def page_shell(title: str, content: str) -> str:
     .notes p {{ color:var(--muted); line-height:1.7; }}
     .panel-help {{ margin:-8px 0 12px; line-height:1.6; }}
     table {{ width:100%; border-collapse:collapse; }}
+    .table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
+    .event-table {{ min-width:760px; }}
     th,td {{ text-align:left; padding:11px 8px; border-bottom:1px solid var(--border); }}
     th {{ color:var(--muted); font-size:12px; }}
     .download-link,.back-link {{ color:var(--primary); font-weight:700; text-decoration:none; }}
@@ -1485,27 +1972,165 @@ def page_shell(title: str, content: str) -> str:
     .login-card button {{ width:100%; margin-top:14px; }}
     .filters {{ display:flex; align-items:end; gap:10px; flex-wrap:wrap; }}
     .filters label {{ display:grid; gap:6px; color:var(--muted); font-size:12px; }}
-    .filters input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+    .filters input,.filters select {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
-    .collector-metrics {{ grid-template-columns:repeat(5,1fr); margin-top:16px; }}
+    .collector-metrics {{ grid-template-columns:repeat(6,1fr); margin-top:16px; }}
+    .task-panel {{ border-top:3px solid var(--primary); }}
+    .collector-workspace {{ display:grid; grid-template-columns:minmax(0,1.35fr) minmax(380px,.85fr);
+      align-items:start; gap:16px; }}
+    .collector-left-column {{ display:grid; gap:16px; min-width:0; }}
+    .task-card {{ border-top:3px solid var(--primary); padding:24px; }}
+    .task-head,.task-primary,.progress-summary > div:first-child,.coverage-summary,
+    .failure-summary,.section-heading,.events-meta,.pagination,.date-nav {{
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+    }}
+    .task-head {{ align-items:flex-start; }}
+    .status-label {{ border-radius:999px; padding:7px 11px; font-size:12px; font-weight:800; }}
+    .status-ok {{ color:#16875b; background:#eaf8f1; }}
+    .status-warning {{ color:#b45309; background:#fff4e5; }}
+    .task-primary {{ align-items:stretch; margin:22px 0 18px; }}
+    .round-display {{ min-width:250px; padding-right:24px; border-right:1px solid var(--border); }}
+    .round-display span,.task-meta span,.task-meta small {{ display:block; color:var(--muted); font-size:12px; }}
+    .round-display strong {{ display:block; margin-top:7px; font-size:28px; }}
+    .task-meta {{ flex:1; }} .task-meta strong {{ display:block; margin:7px 0; }}
+    .progress-summary {{ margin-bottom:18px; }}
+    .progress-track,.mini-track {{ height:8px; background:var(--soft); border-radius:999px; overflow:hidden; }}
+    .progress-track {{ margin-top:9px; }}
+    .progress-track span,.mini-track span {{ display:block; height:100%; background:var(--primary); border-radius:inherit; }}
+    .stats-strip {{ display:grid; grid-template-columns:repeat(7,minmax(0,1fr));
+      border:1px solid var(--border); border-radius:12px; overflow:hidden; }}
+    .stat-item {{ padding:13px 14px; min-width:0; border-right:1px solid var(--border); }}
+    .stat-item:last-child {{ border-right:0; }}
+    .stat-item span {{ display:block; color:var(--muted); font-size:11px; margin-bottom:6px; }}
+    .stat-item strong {{ display:block; font-size:17px; overflow-wrap:anywhere; }}
+    .coverage-summary {{ margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }}
+    .coverage-summary span,.failure-summary span {{ display:block; margin-top:4px; color:var(--muted); font-size:12px; }}
+    .compact-button {{ min-height:38px; padding:7px 12px; font-size:13px; }}
+    .expandable {{ border:0; }}
+    .expandable > summary {{ list-style:none; cursor:pointer; }}
+    .expandable > summary::-webkit-details-marker {{ display:none; }}
+    .expandable-content {{ padding-top:14px; animation:expand-reveal .18s ease; }}
+    .summary-action {{ flex:none; min-height:38px; padding:8px 12px; border:1px solid var(--border);
+      border-radius:9px; color:var(--primary) !important; background:var(--surface); font-size:13px !important;
+      font-weight:750; text-align:center; }}
+    .when-open {{ display:none !important; }}
+    details[open] .when-closed {{ display:none !important; }}
+    details[open] .when-open {{ display:inline !important; }}
+    @keyframes expand-reveal {{ from {{ opacity:0; transform:translateY(-3px); }} to {{ opacity:1; transform:none; }} }}
+    .coverage-table {{ min-width:760px; }}
+    .failure-summary {{ margin-top:16px; padding:13px 14px; border-radius:10px;
+      color:#9a4d08; background:#fff7e8; border:1px solid #f7d7a7; }}
+    .failure-expand .expandable-content {{ overflow-x:auto; }}
+    .events-panel,.distribution-panel {{ padding:24px; min-width:0; }}
+    .events-panel {{ position:sticky; top:16px; height:calc(100vh - 32px); min-height:650px;
+      max-height:920px; display:flex; flex-direction:column; overflow:hidden; }}
+    .section-heading {{ align-items:flex-start; margin-bottom:18px; }}
+    .event-filter-drawer {{ margin-bottom:12px; border:1px solid var(--border); border-radius:10px; }}
+    .event-filter-drawer > summary {{ cursor:pointer; list-style:none; padding:11px 13px;
+      color:var(--primary); font-size:13px; font-weight:750; }}
+    .event-filter-drawer > summary::-webkit-details-marker {{ display:none; }}
+    .event-filter-drawer[open] > summary {{ border-bottom:1px solid var(--border); }}
+    .event-filters {{ display:grid; grid-template-columns:1fr 1fr; padding:12px; background:var(--bg); }}
+    .event-filters label {{ min-width:0; }}
+    .event-filters label:nth-child(3),.event-filters label:nth-child(5) {{ grid-column:1/-1; }}
+    .event-filters input,.event-filters select {{ width:100%; }}
+    .event-filters input[type=hidden] {{ display:none; }}
+    #events-results {{ display:flex; flex:1; min-height:0; flex-direction:column; }}
+    .events-meta {{ margin:4px 0 10px; color:var(--muted); font-size:13px; }}
+    .event-scroll {{ flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border); }}
+    .event-row {{ padding:13px 2px; border-bottom:1px solid var(--border); }}
+    .event-row:last-child {{ border-bottom:0; }}
+    .event-row-head,.event-row-sub,.event-row-values {{ display:flex; justify-content:space-between; gap:10px; }}
+    .event-row-head strong {{ min-width:0; overflow-wrap:anywhere; }}
+    .event-row-sub {{ margin-top:5px; color:var(--muted); font-size:11px; }}
+    .event-row-sub .mono {{ flex:none; }}
+    .event-row-values {{ margin-top:10px; padding:9px 10px; border-radius:9px; background:var(--bg); font-size:12px; }}
+    .event-row-values span {{ min-width:0; }}
+    .event-row-values small {{ display:block; margin-bottom:3px; color:var(--muted); font-size:10px; }}
+    .event-type {{ display:inline-block; white-space:nowrap; padding:5px 8px; border-radius:999px;
+      background:var(--soft); color:var(--primary); font-size:12px; font-weight:700; }}
+    .pagination {{ justify-content:center; margin-top:12px; color:var(--muted); font-size:12px; }}
+    .pagination button {{ min-height:38px; padding:7px 10px; }}
+    button:disabled {{ opacity:.45; cursor:not-allowed; }}
+    .local-loading {{ padding:10px 0; color:var(--primary); font-size:13px; }}
+    .is-loading {{ opacity:.48; pointer-events:none; transition:opacity .15s ease; }}
+    .empty-state {{ padding:32px 12px; text-align:center; color:var(--muted); }}
+    .error-state {{ color:var(--danger); }}
+    .distribution-heading {{ align-items:center; }}
+    .date-nav {{ flex-wrap:wrap; justify-content:flex-end; gap:7px; }}
+    .date-nav input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+      border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
+    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:10px 22px; padding:12px 14px;
+      border:1px solid var(--border); border-radius:12px; margin-bottom:14px; color:var(--muted); }}
+    .distribution-summary strong {{ color:var(--text); margin-right:4px; }}
+    .interval-list {{ display:grid; gap:4px; }}
+    .interval-card {{ display:grid; grid-template-columns:112px minmax(80px,1fr) 176px; align-items:center;
+      gap:12px; min-height:44px; padding:8px 10px; text-align:left; background:var(--surface); color:var(--text);
+      border:1px solid transparent; border-radius:9px; font-weight:400; }}
+    .interval-card:hover,.interval-card.selected {{ border-color:var(--primary); background:var(--soft); }}
+    .interval-card.has-abnormal {{ border-color:#d97706; }}
+    .interval-time {{ font-size:12px; }}
+    .interval-track {{ height:7px; background:var(--soft); border-radius:999px; overflow:hidden; }}
+    .interval-fill {{ display:flex; height:100%; min-width:0; border-radius:inherit; overflow:hidden; }}
+    .consumption-segment {{ height:100%; background:var(--primary); }}
+    .recharge-segment {{ height:100%; background:#16875b; }}
+    .interval-counts {{ display:flex; align-items:center; justify-content:flex-end; gap:9px;
+      color:var(--muted); font-size:11px; white-space:nowrap; }}
+    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:15px; }}
+    .data-note {{ display:flex; gap:12px; align-items:flex-start; padding:5px 4px;
+      color:var(--muted); font-size:12px; line-height:1.6; }}
+    .data-note strong {{ color:var(--text); white-space:nowrap; }}
+    .back-to-top {{ position:fixed; right:18px; bottom:18px; z-index:5; box-shadow:0 4px 16px #17223b18;
+      opacity:0; pointer-events:none; transform:translateY(8px); transition:opacity .18s ease,transform .18s ease; }}
+    .back-to-top.visible {{ opacity:1; pointer-events:auto; transform:translateY(0); }}
     .error {{ margin-top:16px; padding:12px; border-radius:10px;
       background:#fdecec; color:var(--danger); }}
     .notice {{ margin-top:16px; padding:12px; border-radius:10px;
       background:var(--soft); color:var(--primary); }}
+    @media(max-width:1100px) {{
+      .collector-workspace {{ grid-template-columns:1fr; }}
+      .events-panel {{ position:static; height:720px; max-height:none; }}
+    }}
     @media(max-width:920px) {{
       .metric-grid {{ grid-template-columns:repeat(3,1fr); }}
       .two-column {{ grid-template-columns:1fr; }}
       .collector-metrics {{ grid-template-columns:repeat(3,1fr); }}
+      .stats-strip {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
+      .stat-item {{ border-bottom:1px solid var(--border); }}
+      .interval-card {{ grid-template-columns:108px minmax(70px,1fr) 160px; }}
     }}
     @media(max-width:560px) {{
       .topbar {{ align-items:flex-start; flex-direction:column; padding-top:28px; }}
       .metric-grid {{ grid-template-columns:repeat(2,1fr); }}
       dl {{ grid-template-columns:1fr; gap:4px; }} dd {{ margin-bottom:10px; }}
+      .task-card,.events-panel,.distribution-panel {{ padding:18px; }}
+      .task-primary,.coverage-summary,.failure-summary,.section-heading {{ align-items:flex-start; flex-direction:column; }}
+      .summary-action {{ width:100%; }}
+      .round-display {{ min-width:0; width:100%; padding:0 0 14px; border-right:0; border-bottom:1px solid var(--border); }}
+      .stats-strip {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+      .stat-item:nth-child(even) {{ border-right:0; }}
+      .event-filters label,.event-filters label:nth-child(5) {{ min-width:0; }}
+      .event-filters label:nth-child(3),.event-filters label:nth-child(5) {{ grid-column:1/-1; }}
+      .event-filters button {{ width:100%; justify-content:center; }}
+      .pagination {{ flex-wrap:wrap; }}
+      .distribution-heading {{ align-items:flex-start; }}
+      .date-nav {{ justify-content:flex-start; }}
+      .interval-card {{ grid-template-columns:1fr auto; gap:5px 10px; }}
+      .interval-visual {{ grid-column:1/-1; grid-row:2; }}
+      .interval-counts {{ grid-column:2; grid-row:1; }}
+      .event-row-values {{ flex-wrap:wrap; }}
+      .events-panel {{ height:680px; }}
+      .data-note {{ flex-direction:column; }}
+      .back-to-top {{ right:12px; bottom:12px; }}
     }}
     @media(prefers-color-scheme:dark) {{
       :root {{ --bg:#10131a; --surface:#181d27; --text:#f1f4f8; --muted:#b0bac9;
         --border:#303846; --primary:#7ea2ff; --soft:#25345c; --danger:#ff8a8a; }}
       .error {{ background:#432326; }}
+      .status-ok {{ color:#77d5ae; background:#193b31; }}
+      .status-warning {{ color:#ffc178; background:#49341c; }}
+      .failure-summary {{ color:#ffc178; background:#33291d; border-color:#6f512d; }}
     }}
   </style>
 </head>

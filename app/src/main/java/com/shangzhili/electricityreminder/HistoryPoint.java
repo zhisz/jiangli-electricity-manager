@@ -27,7 +27,12 @@ public final class HistoryPoint {
         this.changeType = changeType == null ? "" : changeType;
     }
 
-    public boolean isSuspectedRechargeOrCorrection() {
-        return "疑似充值或平台修正".equals(changeType);
+    public boolean isRechargeChange() {
+        /*
+         * 新服务端将所有正向余额变化统一标记为“充值”。保留旧标签兼容已下载到本地的
+         * 1.2.x 云端历史，避免升级 App 后旧记录突然失去充值跳升效果。
+         */
+        return "充值".equals(changeType)
+                || "疑似充值或平台修正".equals(changeType);
     }
 }
