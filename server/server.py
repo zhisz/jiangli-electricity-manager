@@ -1921,7 +1921,7 @@ def product_page(manifest: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#201435">
-  <meta name="description" content="江理电小侠（南昌校区）：余额查询、低余额提醒与趋势查看。">
+  <meta name="description" content="江理电小侠（南昌校区）：提前关注宿舍电量，避免游戏或空调因余额不足突然断电。">
   <title>江理电小侠（南昌校区）</title>
   <style>
     :root {{ --bg:#f7f3eb; --surface:#fffdf9; --ink:#211c2c; --muted:#716a76;
@@ -2027,9 +2027,9 @@ def product_page(manifest: dict[str, Any]) -> str:
   <main>
     <section class="hero">
       <div>
-        <div class="kicker">江西理工大学 · 南昌校区</div>
-        <h1>宿舍电量，<br>一眼看清。</h1>
-        <p class="lead">查询当前余额、观察电量趋势，并在余额不足时及时收到提醒。</p>
+        <div class="kicker">南昌校区宿舍用电助手</div>
+        <h1>别等突然停电，<br>才想起查余额。</h1>
+        <p class="lead">游戏正到关键时刻，空调正在对抗炎炎夏日——提前盯住余额，别让突然断电打乱节奏。</p>
         <a class="primary" href="/downloads/latest.apk">立即下载 Android 版</a><span class="version">{version}</span>
         <div class="trust"><span>无需注册</span><span>本地配置优先</span><span>服务器离线不影响查询</span></div>
       </div>
@@ -2056,15 +2056,15 @@ def product_page(manifest: dict[str, Any]) -> str:
       </div>
     </section>
     <section class="section">
-      <h2>少一点操作，多一点安心</h2>
-      <p class="section-intro">围绕校园用电的高频场景设计，不堆功能，也不打扰。</p>
+      <h2>这些瞬间，真的很扫兴</h2>
+      <p class="section-intro">停电总是来得突然，但余额不足其实可以更早知道。</p>
       <div class="features">
-        <article class="feature"><div class="feature-icon">⌁</div><h3>余额与趋势</h3><p>打开房间即可刷新余额；最近 30 天趋势支持横向查看。</p></article>
-        <article class="feature"><div class="feature-icon">◷</div><h3>整点监测</h3><p>按设定策略自动监测，余额不足后继续复查并发送通知。</p></article>
-        <article class="feature"><div class="feature-icon">¥</div><h3>快捷充值</h3><p>首页一键进入电费充值，付款仍由微信与校付宝官方链路完成。</p></article>
+        <article class="feature"><div class="feature-icon">⚡</div><h3>团战正关键，宿舍突然断电</h3><p>余额和趋势随手可查，低余额提前提醒，少一次措手不及。</p></article>
+        <article class="feature"><div class="feature-icon">❄</div><h3>炎炎夏日，空调突然停转</h3><p>设置自己的提醒阈值，开启监测后持续复查，不必等到电量归零才发现。</p></article>
+        <article class="feature"><div class="feature-icon">¥</div><h3>想充值，却想不起入口在哪</h3><p>不用再翻公众号和历史消息，首页直接进入校付宝官方充值流程。</p></article>
       </div>
       <div class="download-card" id="download">
-        <div><h2>开始使用江理电小侠</h2><p>仅支持江西理工大学南昌校区 · Android 8.0 及以上</p></div>
+        <div><h2>别让余额不足，变成突然停电</h2><p>提前看余额，充值少绕路 · 仅支持江西理工大学南昌校区</p></div>
         <a class="primary" href="/downloads/latest.apk">立即下载最新版</a>
       </div>
     </section>

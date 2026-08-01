@@ -241,6 +241,9 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("江理电小侠", page)
         self.assertIn("/assets/mascot-app-icon.png", page)
         self.assertIn("/downloads/latest.apk", page)
+        # 产品页文案直接回应学生常见的断电与充值入口难找问题，避免后续改版时退回功能罗列。
+        self.assertIn("别等突然停电", page)
+        self.assertIn("想充值，却想不起入口在哪", page)
         self.assertNotIn("electricity-reminder-1.3.0.apk", page)
         self.assertIn("1.3.0", page)
 
