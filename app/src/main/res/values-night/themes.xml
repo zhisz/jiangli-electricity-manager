@@ -13,4 +13,13 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+
+    <!-- 夜间弹窗必须使用深色 Material 父主题，否则只有背景变暗而按钮和文字仍按浅色计算。 -->
+    <style name="BaseDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/base_dialog_background</item>
+        <item name="android:colorAccent">@color/purple_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
 </resources>

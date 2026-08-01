@@ -33,4 +33,6 @@
     <color name="chart_missing">#596477</color>
     <color name="chart_recharge">#F2B45F</color>
     <color name="disabled">#596273</color>
+    <!-- 对话气泡比深色卡片稍亮，但不会变成刺眼纯白。 -->
+    <color name="speech_surface">#292532</color>
 </resources>
