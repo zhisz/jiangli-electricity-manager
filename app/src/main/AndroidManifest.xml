@@ -51,6 +51,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".HeroBaseActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".UsageStatisticsActivity"
             android:exported="false" />
 

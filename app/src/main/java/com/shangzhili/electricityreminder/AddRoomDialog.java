@@ -219,7 +219,8 @@ public final class AddRoomDialog {
                     "amount",
                     20,
                     25,
-                    2_880,
+                    // 低余额后默认每 60 分钟复查；用户可稍后在房间设置中自行调整。
+                    AppConfig.DEFAULT_REPEAT_MINUTES,
                     Collections.singletonList(new DailyCheckTime(9, 0))
             );
             repository.save(roomId, config);

@@ -244,6 +244,21 @@
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
+        <!-- 基地只保留状态和品牌内容；低频工具统一归入设置页，避免两个入口重复。 -->
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="应用与数据"
+            android:textSize="17sp" android:textStyle="bold" />
+        <Button android:id="@+id/manualUpdateButton" style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:text="检查应用更新" />
+        <Button android:id="@+id/dataStorageButton" style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:text="数据与存储" />
+        <Button android:id="@+id/usageHelpButton" style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:text="使用说明" />
+
         <!--
           署名和反馈入口放在页面最底部，保持低视觉权重，不干扰上方系统设置任务。
           邮箱仍满足 48dp 触控高度，方便用户直接唤起邮件应用。

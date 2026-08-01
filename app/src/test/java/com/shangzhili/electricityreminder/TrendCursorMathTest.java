@@ -8,6 +8,13 @@ import org.junit.Test;
 
 public final class TrendCursorMathTest {
     @Test
+    public void defaultCursorSelectsLatestPoint() {
+        assertEquals(4, TrendCursorMath.latestIndex(5));
+        assertEquals(0, TrendCursorMath.latestIndex(1));
+        assertEquals(-1, TrendCursorMath.latestIndex(0));
+    }
+
+    @Test
     public void dragStartsOnlyNearExistingCursor() {
         assertTrue(TrendCursorMath.isDragStart(118f, 100f, 28f));
         assertTrue(TrendCursorMath.isDragStart(72f, 100f, 28f));

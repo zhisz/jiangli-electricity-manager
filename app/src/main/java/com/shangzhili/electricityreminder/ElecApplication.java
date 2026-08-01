@@ -71,6 +71,12 @@ public final class ElecApplication extends Application
         updateManager.checkOnLaunch();
     }
 
+    /** 基地里的显式“检查更新”不受同一次前台会话自动检查去重限制。 */
+    void requestManualUpdate(Activity activity) {
+        ensureUpdateManager(activity);
+        updateManager.checkOnLaunch();
+    }
+
     @Override
     public void onActivityStopped(Activity activity) {
         startedActivities = Math.max(0, startedActivities - 1);

@@ -4,6 +4,11 @@ package com.shangzhili.electricityreminder;
 final class TrendCursorMath {
     private TrendCursorMath() {}
 
+    /** 有数据时默认选择最后一个趋势点；空数据保持未选中状态。 */
+    static int latestIndex(int pointCount) {
+        return pointCount > 0 ? pointCount - 1 : -1;
+    }
+
     /** 只有按下点落在现有辅助线命中半径内，才允许把横滑解释为游标调整。 */
     static boolean isDragStart(float touchX, float cursorX, float hitRadius) {
         return Float.isFinite(cursorX)

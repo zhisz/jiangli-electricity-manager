@@ -69,12 +69,12 @@ public final class ConfigStore {
      */
     private double readRepeatMinutes() {
         if (preferences.contains("repeatMinutes")) {
-            return readDouble("repeatMinutes", 2_880);
+            return readDouble("repeatMinutes", AppConfig.DEFAULT_REPEAT_MINUTES);
         }
         if (preferences.contains("repeatHours")) {
             return readDouble("repeatHours", 48) * 60;
         }
-        // 原来的默认值是 48 小时，换算为 2880 分钟，保持新安装的提醒频率不突变。
-        return 2_880;
+        // 全新配置默认每 60 分钟复查；旧版 repeatHours 仍由上方分支准确迁移。
+        return AppConfig.DEFAULT_REPEAT_MINUTES;
     }
 }

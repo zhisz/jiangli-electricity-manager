@@ -220,6 +220,17 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(22, version_code)
         self.assertTrue(path.is_file())
 
+    def test_signed_feedback_is_stored_and_escaped_in_admin_page(self):
+        service = app_server.ElecService(self.settings)
+        feedback_id = service.store.record_feedback("测试同学", "很好用 <script>", "1.6.0")
+        items = service.store.list_feedback()
+        self.assertEqual(feedback_id, items[0]["id"])
+        self.assertEqual("测试同学", items[0]["signature"])
+        page = app_server.feedback_page(items)
+        self.assertIn("测试同学", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertNotIn("很好用 <script>", page)
+
     def test_old_apk_remains_downloadable_without_polluting_latest_count(self):
         old_apk = self.settings.download_dir / "electricity-reminder-0.14.0.apk"
         old_apk.write_bytes(b"old fake apk")

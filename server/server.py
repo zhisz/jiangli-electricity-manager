@@ -225,14 +225,41 @@ class AnalyticsStore:
                     PRIMARY KEY (version_code, identity_hash)
                 );
 
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    signature TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    app_version TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_daily_active_day
                     ON daily_active(day);
                 CREATE INDEX IF NOT EXISTS idx_installations_version
                     ON installations(current_version_code);
                 CREATE INDEX IF NOT EXISTS idx_downloads_version
                     ON downloads(version_code);
+                CREATE INDEX IF NOT EXISTS idx_feedback_created
+                    ON feedback(created_at DESC, id DESC);
                 """
             )
+
+    def record_feedback(self, signature: str, content: str, app_version: str) -> int:
+        """反馈与匿名统计共用轻量数据库，但不接收设备、房间或提醒配置。"""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO feedback(created_at, signature, content, app_version) VALUES (?, ?, ?, ?)",
+                (iso_utc_now(), signature, content, app_version),
+            )
+            return int(cursor.lastrowid)
+
+    def list_feedback(self, limit: int = 300) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, created_at, signature, content, app_version FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?",
+                (max(1, min(limit, 1000)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def record_heartbeat(
         self,
@@ -447,6 +474,8 @@ class ElecService:
         self.store = AnalyticsStore(settings.database_path, settings.telemetry_key)
         self.login_limiter = LoginLimiter()
         self.public_read_limiter = PublicReadLimiter()
+        # 反馈接口按来源临时限速，不持久化 IP；每小时最多 5 次足够正常使用并抑制刷屏。
+        self.feedback_limiter = PublicReadLimiter(maximum=5, window_seconds=3600)
         self.started_at = utc_now()
         self._password_lock = threading.Lock()
         # 会话代次不落盘：修改密码或重启服务都会让旧 Cookie 立即失效。
@@ -681,6 +710,21 @@ class Handler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     password_page(self.service.csrf_token(session)),
                 )
+        elif path == "/admin/feedback":
+            session = self._session_token()
+            if not session:
+                self._redirect("/admin/login")
+            else:
+                try:
+                    self._send_html(
+                        HTTPStatus.OK,
+                        feedback_page(self.service.store.list_feedback()),
+                    )
+                except sqlite3.Error as exception:
+                    self._send_html(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        error_page("反馈读取失败", str(exception)),
+                    )
         elif path in {
             "/admin/collector",
             "/admin/collector/events",
@@ -749,6 +793,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/api/v1/heartbeat":
             self._heartbeat()
+        elif path == "/api/v1/feedback":
+            self._feedback()
         elif path == "/admin/login":
             self._login()
         elif path == "/admin/logout":
@@ -782,6 +828,27 @@ class Handler(BaseHTTPRequestHandler):
                 install_id, version_code, version_name, event_day, historical
             )
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", None)
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
+        except sqlite3.Error:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "temporarily unavailable"})
+
+    def _feedback(self) -> None:
+        """接收应用内署名反馈；严格限制长度，不记录来源 IP 和用户房间信息。"""
+        try:
+            if not self.service.feedback_limiter.allow(self._client_ip()):
+                self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
+                return
+            payload = self._read_json()
+            signature = str(payload.get("signature", "")).strip()
+            content = str(payload.get("content", "")).strip()
+            app_version = str(payload.get("appVersion", "")).strip()
+            if not signature or len(signature) > 40 or not content or len(content) > 2000:
+                raise ValueError("invalid feedback")
+            if not app_version or len(app_version) > 40:
+                raise ValueError("invalid app version")
+            feedback_id = self.service.store.record_feedback(signature, content, app_version)
+            self._send_json(HTTPStatus.CREATED, {"success": True, "id": feedback_id})
         except (ValueError, json.JSONDecodeError):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
         except sqlite3.Error:
@@ -1257,6 +1324,7 @@ def dashboard_page(
             <p class="muted">匿名使用概览 · 中国标准时间</p>
           </div>
           <div class="header-actions">
+            <a class="secondary" href="/admin/feedback">用户反馈</a>
             <a class="secondary" href="/admin/collector">云端采集</a>
             <a class="secondary" href="/admin/password">修改密码</a>
             <a class="secondary" href="/admin/">刷新数据</a>
@@ -1335,6 +1403,41 @@ def dashboard_page(
           </section>
         </main>
         <footer>江理电小侠开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
+        """,
+    )
+
+
+def feedback_page(items: list[dict[str, Any]]) -> str:
+    """开发者专用反馈列表；所有用户文本都经过 HTML 转义。"""
+    cards = []
+    for item in items:
+        created = str(item.get("created_at", ""))
+        try:
+            created = dt.datetime.fromisoformat(created).astimezone(SHANGHAI).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        except ValueError:
+            pass
+        cards.append(
+            '<article class="panel feedback-item">'
+            '<div class="panel-title"><div>'
+            f'<span class="eyebrow">#{int(item.get("id", 0))} · {html.escape(created)}</span>'
+            f'<h2>{html.escape(str(item.get("signature", "")))}</h2></div>'
+            f'<span class="pill">App {html.escape(str(item.get("app_version", "")))}</span></div>'
+            f'<p>{html.escape(str(item.get("content", ""))).replace(chr(10), "<br>")}</p>'
+            '</article>'
+        )
+    body = "".join(cards) or '<section class="panel empty-state">暂时还没有用户反馈</section>'
+    return page_shell(
+        "用户反馈",
+        f"""
+        <header class="topbar">
+          <div><div class="eyebrow">FEEDBACK</div><h1>用户反馈</h1>
+          <p class="muted">应用内署名反馈 · 最新在前</p></div>
+          <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
+        </header>
+        <main><section class="feedback-list">{body}</section></main>
+        <footer>反馈仅包含署名、正文、App 版本和服务器接收时间</footer>
         """,
     )
 
@@ -2134,6 +2237,8 @@ def page_shell(title: str, content: str) -> str:
     .break {{ overflow-wrap:anywhere; }} .mono {{ font-family:ui-monospace,SFMono-Regular,monospace; font-size:12px; }}
     .notes {{ border-top:1px solid var(--border); margin-top:18px; padding-top:16px; }}
     .notes p {{ color:var(--muted); line-height:1.7; }}
+    .feedback-list {{ display:grid; gap:12px; }}
+    .feedback-item p {{ margin:0; line-height:1.75; overflow-wrap:anywhere; white-space:normal; }}
     .panel-help {{ margin:-8px 0 12px; line-height:1.6; }}
     table {{ width:100%; border-collapse:collapse; }}
     .table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}

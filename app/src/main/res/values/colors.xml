@@ -10,6 +10,16 @@
     <color name="purple_primary_dark">#4F3F96</color>
     <color name="purple_primary_soft">#F0EDFA</color>
     <color name="mascot_icon_background">#180D3F</color>
+    <color name="base_background">#201435</color>
+    <color name="base_surface">#2D2042</color>
+    <color name="base_surface_pressed">#3A2A52</color>
+    <color name="base_border">#49365F</color>
+    <color name="base_text">#FFFDF9</color>
+    <color name="base_muted">#C8BCD4</color>
+    <color name="base_lightning">#FFD84A</color>
+    <!-- 品牌弹窗始终使用暖白底，因此文字色固定，不随夜间资源反转成浅色。 -->
+    <color name="base_dialog_text">#2A2133</color>
+    <color name="base_dialog_muted">#756A7D</color>
     <color name="accent">#2457D6</color>
     <color name="page_background">#F5F7FB</color>
     <color name="surface">#FFFFFF</color>

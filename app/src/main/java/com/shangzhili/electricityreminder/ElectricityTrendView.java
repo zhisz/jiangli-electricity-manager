@@ -114,7 +114,8 @@ public final class ElectricityTrendView extends View {
     ) {
         points.clear();
         if (trendPoints != null) points.addAll(trendPoints);
-        selectedIndex = -1;
+        // 首次进入或数据刷新后默认选中最新点；具体横坐标需等 View 完成测量后才能确定。
+        selectedIndex = TrendCursorMath.latestIndex(points.size());
         cursorX = Float.NaN;
         updateContentDescription();
         requestLayout();
@@ -215,6 +216,11 @@ public final class ElectricityTrendView extends View {
         canvas.drawPath(estimatePath, glowPaint);
         canvas.drawPath(estimatePath, estimatePaint);
 
+        /*
+         * setData 时内容宽度尚未测量，不能提前计算最右侧坐标。第一次绘制已经拥有可靠
+         * 的 right，此时再初始化游标，进入页面即可看到最新趋势值和辅助线。
+         */
+        if (selectedIndex >= 0 && !Float.isFinite(cursorX)) cursorX = right;
         if (selectedIndex >= 0 && selectedIndex < points.size() && Float.isFinite(cursorX)) {
             float activeX = Math.max(left, Math.min(right, cursorX));
             double activeValue = TrendCursorMath.interpolate(activeX, x, smoothedValues);

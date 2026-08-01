@@ -26,12 +26,15 @@
               clipToOutline 让方形原画在这里成为柔和圆角徽章，且不会影响启动器图标资源。
             -->
             <ImageView
+                android:id="@+id/mascotBaseButton"
                 android:layout_width="46dp"
                 android:layout_height="46dp"
                 android:layout_marginEnd="@dimen/space_3"
                 android:background="@drawable/mascot_badge_background"
                 android:clipToOutline="true"
-                android:contentDescription="电击小子图标"
+                android:clickable="true"
+                android:contentDescription="进入电小侠基地"
+                android:focusable="true"
                 android:padding="2dp"
                 android:scaleType="centerCrop"
                 android:src="@drawable/mascot_app_icon" />
@@ -63,8 +66,11 @@
             <Button
                 android:id="@+id/systemSettingsButton"
                 style="@style/Ui.Button.Text"
-                android:layout_width="48dp"
+                android:layout_width="wrap_content"
                 android:layout_height="48dp"
+                android:minWidth="48dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:contentDescription="系统设置"
                 android:text="⚙" />
         </LinearLayout>
