@@ -143,8 +143,8 @@
     <style name="BaseDialogTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:windowBackground">@drawable/base_dialog_background</item>
         <item name="android:colorAccent">@color/purple_primary</item>
-        <item name="android:textColorPrimary">@color/base_dialog_text</item>
-        <item name="android:textColorSecondary">@color/base_dialog_muted</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:fontFamily">sans</item>
     </style>
 </resources>

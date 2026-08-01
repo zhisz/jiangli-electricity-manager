@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 47,
-  "versionName": "1.6.1",
+  "versionCode": 48,
+  "versionName": "1.6.2",
   "minSupportedVersionCode": 45,
   "forceUpdate": false,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.6.1.apk",
+  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.6.2.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "电小侠基地支持首页右滑进入、基地左滑返回；角色问候改为可点击切换的对话气泡，设置与主题切换移至底部；反馈成功提示会带上用户署名，说明弹窗统一为品牌样式。"
+  "releaseNotes": "电小侠基地升级为五分之六宽跟手侧滑层，拖动边界随手指移动并保留右侧主页；基地、弹窗和主页统一切换深浅主题；问候改为贴近角色的云朵气泡，设置与主题按钮固定在左下方。"
 }

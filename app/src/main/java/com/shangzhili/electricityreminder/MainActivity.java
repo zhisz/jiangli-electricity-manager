@@ -1,10 +1,12 @@
 package com.shangzhili.electricityreminder;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.HapticFeedbackConstants;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -37,9 +39,8 @@ public final class MainActivity extends Activity {
     private Button systemSettingsButton;
     private SetupPreferences setupPreferences;
     private AlertDialog firstUseGuide;
-    private float baseSwipeDownX;
-    private float baseSwipeDownY;
-    private boolean baseSwipeConsumed;
+    private InteractiveDrawerLayout drawerLayout;
+    private HeroBaseController heroBaseController;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,6 +60,16 @@ public final class MainActivity extends Activity {
         reorderHintText = findViewById(R.id.reorderHintText);
         systemSettingsButton = findViewById(R.id.systemSettingsButton);
 
+        drawerLayout = findViewById(R.id.mainDrawerLayout);
+        View heroPanel = findViewById(R.id.heroBasePanel);
+        drawerLayout.bind(heroPanel, findViewById(R.id.drawerScrim));
+        heroBaseController = new HeroBaseController(
+                this, heroPanel, () -> drawerLayout.closeDrawer(true));
+        drawerLayout.setDrawerStateListener(open -> {
+            if (open) heroBaseController.onVisible();
+            else heroBaseController.onHidden();
+        });
+
         systemSettingsButton.setOnClickListener(view -> openSystemSettings());
         findViewById(R.id.mascotBaseButton).setOnClickListener(this::openHeroBase);
 
@@ -70,6 +81,12 @@ public final class MainActivity extends Activity {
 
         // 首次安装只展示一次说明。用户以后仍可从首页右上角重新进入设置检查。
         showFirstUseGuideIfNeeded();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    this::handleBack
+            );
+        }
     }
 
     @Override
@@ -81,6 +98,12 @@ public final class MainActivity extends Activity {
         }
         renderRooms();
         refreshSystemSettingsStatus();
+        if (drawerLayout.isDrawerOpen()) heroBaseController.onVisible();
+    }
+
+    @Override protected void onPause() {
+        if (heroBaseController != null) heroBaseController.onHidden();
+        super.onPause();
     }
 
     /**
@@ -151,51 +174,25 @@ public final class MainActivity extends Activity {
         startActivity(new Intent(this, SystemSettingsActivity.class));
     }
 
-    /**
-     * 头像是品牌空间的隐藏入口。先做一次极轻的放大反馈，再用淡入淡出进入深紫基地；
-     * 总时长控制在 250ms 左右，不会拖慢首页的高频查询和充值操作。
-     */
+    /** 点击头像与手势共用同一个侧滑层，避免出现两套不同的进入动画和返回栈。 */
     private void openHeroBase(View mascot) {
         if (!mascot.isEnabled()) return;
         mascot.setEnabled(false);
         mascot.animate().scaleX(1.12f).scaleY(1.12f).setDuration(100).withEndAction(() -> {
-            launchHeroBase();
+            drawerLayout.openDrawer(true);
             mascot.animate().scaleX(1f).scaleY(1f).setDuration(140)
                     .withEndAction(() -> mascot.setEnabled(true)).start();
         }).start();
     }
 
-    private void launchHeroBase() {
-        startActivity(new Intent(this, HeroBaseActivity.class));
-        overridePendingTransition(R.anim.base_enter_from_left, android.R.anim.fade_out);
+    private void handleBack() {
+        if (drawerLayout.isDrawerOpen()) drawerLayout.closeDrawer(true);
+        else finish();
     }
 
-    /** 类似 QQ 侧页：明显向右的水平手势打开基地，垂直滚动和拖拽排序不受影响。 */
-    @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                baseSwipeDownX = event.getRawX(); baseSwipeDownY = event.getRawY();
-                baseSwipeConsumed = false;
-                break;
-            case MotionEvent.ACTION_MOVE:
-                float dx = event.getRawX() - baseSwipeDownX;
-                float dy = event.getRawY() - baseSwipeDownY;
-                if (!baseSwipeConsumed && dx > dp(72) && dx > Math.abs(dy) * 1.7f) {
-                    baseSwipeConsumed = true;
-                    MotionEvent cancel = MotionEvent.obtain(event);
-                    cancel.setAction(MotionEvent.ACTION_CANCEL);
-                    super.dispatchTouchEvent(cancel); cancel.recycle();
-                    launchHeroBase();
-                    return true;
-                }
-                break;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                if (baseSwipeConsumed) { baseSwipeConsumed = false; return true; }
-                break;
-        }
-        return super.dispatchTouchEvent(event);
-    }
+    /** Android 8～12 的返回键兼容路径；Android 13+ 由预测性返回回调处理。 */
+    @SuppressLint("GestureBackNavigation")
+    @Override public void onBackPressed() { handleBack(); }
 
     private void renderRooms() {
         roomsContainer.removeAllViews();

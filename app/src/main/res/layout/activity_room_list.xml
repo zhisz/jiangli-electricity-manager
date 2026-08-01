@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 首页只保留房间概览和两个全局入口；房间业务操作全部留在详情页。 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.shangzhili.electricityreminder.InteractiveDrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mainDrawerLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+<ScrollView
+    android:id="@+id/homeContent"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:clipToPadding="false"
@@ -110,3 +116,14 @@
             android:orientation="vertical" />
     </LinearLayout>
 </ScrollView>
+
+    <!-- 位于主页和基地之间，只提供轻微压暗层次；基地上层阴影明确谁覆盖谁。 -->
+    <View
+        android:id="@+id/drawerScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:visibility="invisible" />
+
+    <include layout="@layout/activity_hero_base" />
+</com.shangzhili.electricityreminder.InteractiveDrawerLayout>
