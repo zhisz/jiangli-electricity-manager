@@ -24,6 +24,7 @@ import java.util.Locale;
 
 /** 首页只负责展示用户已经添加的房间；每个房间的查询和规则位于详情页。 */
 public final class MainActivity extends Activity {
+    private static final String STATE_HERO_BASE_OPEN = "heroBaseOpen";
     @Override
     protected void attachBaseContext(Context newBase) {
         super.attachBaseContext(AppThemeManager.wrap(newBase));
@@ -65,6 +66,14 @@ public final class MainActivity extends Activity {
         drawerLayout.bind(heroPanel, findViewById(R.id.drawerScrim));
         heroBaseController = new HeroBaseController(
                 this, heroPanel, () -> drawerLayout.closeDrawer(true));
+        /*
+         * 深浅色切换通过 recreate() 重新读取 values/values-night。先恢复抽屉状态、再注册
+         * 状态监听，首次布局便会直接画出展开的基地，也不会重复启动两次角色动画或版本查询。
+         */
+        if (savedInstanceState != null
+                && savedInstanceState.getBoolean(STATE_HERO_BASE_OPEN, false)) {
+            drawerLayout.openDrawer(false);
+        }
         drawerLayout.setDrawerStateListener(open -> {
             if (open) heroBaseController.onVisible();
             else heroBaseController.onHidden();
@@ -104,6 +113,12 @@ public final class MainActivity extends Activity {
     @Override protected void onPause() {
         if (heroBaseController != null) heroBaseController.onHidden();
         super.onPause();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(STATE_HERO_BASE_OPEN,
+                drawerLayout != null && drawerLayout.isDrawerOpen());
+        super.onSaveInstanceState(outState);
     }
 
     /**

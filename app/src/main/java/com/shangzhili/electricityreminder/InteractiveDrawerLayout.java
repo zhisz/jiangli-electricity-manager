@@ -74,7 +74,9 @@ public final class InteractiveDrawerLayout extends FrameLayout {
         drawer.layout(0, 0, drawer.getMeasuredWidth(), getMeasuredHeight());
         if (!positionInitialized && drawer.getWidth() > 0) {
             positionInitialized = true;
-            setDrawerTranslation(-drawer.getWidth());
+            // 主题切换会重建 Activity；若上一个实例正在展示基地，首次布局直接保持展开，
+            // 不先闪回主页再重新打开。
+            setDrawerTranslation(drawerOpen ? 0f : -drawer.getWidth());
         }
     }
 
