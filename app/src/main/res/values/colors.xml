@@ -17,6 +17,9 @@
     <color name="base_text">#FFFDF9</color>
     <color name="base_muted">#C8BCD4</color>
     <color name="base_lightning">#FFD84A</color>
+    <!-- 品牌弹窗始终使用暖白底，因此文字色固定，不随夜间资源反转成浅色。 -->
+    <color name="base_dialog_text">#2A2133</color>
+    <color name="base_dialog_muted">#756A7D</color>
     <color name="accent">#2457D6</color>
     <color name="page_background">#F5F7FB</color>
     <color name="surface">#FFFFFF</color>

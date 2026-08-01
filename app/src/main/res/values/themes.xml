@@ -135,4 +135,16 @@
         <item name="android:textColor">@color/base_muted</item><item name="android:textSize">14sp</item>
         <item name="android:paddingTop">6dp</item><item name="android:paddingBottom">6dp</item>
     </style>
+    <style name="BaseBottomButton" parent="BaseToolButton">
+        <item name="android:layout_height">48dp</item><item name="android:layout_marginTop">0dp</item>
+        <item name="android:gravity">center</item><item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+    </style>
+    <style name="BaseDialogTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/base_dialog_background</item>
+        <item name="android:colorAccent">@color/purple_primary</item>
+        <item name="android:textColorPrimary">@color/base_dialog_text</item>
+        <item name="android:textColorSecondary">@color/base_dialog_muted</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
 </resources>

@@ -15,11 +15,14 @@
             android:scaleType="fitCenter" android:src="@drawable/mascot_base_character"
             android:contentDescription="会动的电小侠，点击和它互动"/>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp" android:gravity="center" android:text="电小侠基地"
+            android:layout_marginTop="4dp" android:gravity="center" android:text="电小侠基地"
             android:textColor="@color/base_text" android:textSize="25sp" android:textStyle="bold"/>
         <TextView android:id="@+id/baseGreetingText" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="6dp" android:gravity="center" android:textColor="@color/base_muted"
-            android:textSize="14sp" android:lineSpacingExtra="3dp"/>
+            android:layout_marginTop="12dp" android:background="@drawable/base_speech_background"
+            android:gravity="center" android:minHeight="56dp" android:paddingStart="18dp"
+            android:paddingTop="12dp" android:paddingEnd="18dp" android:paddingBottom="12dp"
+            android:textColor="#2A2133" android:textSize="14sp"
+            android:textStyle="bold" android:lineSpacingExtra="3dp"/>
         <TextView android:id="@+id/baseMascotStateText" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal" android:layout_marginTop="10dp"
             android:textColor="@color/base_lightning" android:textSize="12sp" android:textStyle="bold"/>
@@ -35,14 +38,6 @@
         </GridLayout>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
-            android:text="我的工具" android:textColor="@color/base_text" android:textSize="18sp" android:textStyle="bold"/>
-        <Button android:id="@+id/baseThemeButton" style="@style/BaseToolButton" android:text="主题与外观　›"/>
-        <Button android:id="@+id/baseSystemButton" style="@style/BaseToolButton" android:text="系统监测设置　›"/>
-        <Button android:id="@+id/baseUpdateButton" style="@style/BaseToolButton" android:text="检查应用更新　›"/>
-        <Button android:id="@+id/baseDataButton" style="@style/BaseToolButton" android:text="数据与存储　›"/>
-        <Button android:id="@+id/baseHelpButton" style="@style/BaseToolButton" android:text="使用说明　›"/>
-
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
             android:text="关于电小侠" android:textColor="@color/base_text" android:textSize="18sp" android:textStyle="bold"/>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
             android:background="@drawable/base_card_background" android:orientation="vertical" android:padding="16dp">
@@ -53,5 +48,13 @@
         <Button android:id="@+id/baseFeedbackButton" style="@style/BaseToolButton" android:text="意见反馈（需署名）　›"/>
         <Button android:id="@+id/baseGithubButton" style="@style/BaseToolButton" android:text="GitHub 开源地址　›"/>
         <Button android:id="@+id/basePrivacyButton" style="@style/BaseToolButton" android:text="隐私与数据说明　›"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:gravity="center" android:orientation="horizontal">
+            <Button android:id="@+id/baseSettingsButton" style="@style/BaseBottomButton"
+                android:layout_width="0dp" android:layout_weight="1" android:text="⚙　设置"/>
+            <Button android:id="@+id/baseAppearanceButton" style="@style/BaseBottomButton"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="10dp"
+                android:text="☀　浅色"/>
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

@@ -2,6 +2,7 @@ package com.shangzhili.electricityreminder;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -68,6 +69,18 @@ public final class SystemSettingsActivity extends Activity {
                 .setOnClickListener(view -> openAutoStartSettings());
         findViewById(R.id.feedbackEmailButton)
                 .setOnClickListener(view -> openFeedbackEmail());
+        findViewById(R.id.manualUpdateButton).setOnClickListener(view -> {
+            toast("正在检查更新");
+            ((ElecApplication) getApplication()).requestManualUpdate(this);
+        });
+        findViewById(R.id.dataStorageButton).setOnClickListener(view -> showInfo(
+                "数据与存储",
+                "房间配置、监测状态和查询记录主要保存在本机。云端公共历史仅用于补全趋势；服务器不可用时，当前余额查询、提醒和本地记录仍可正常使用。"
+        ));
+        findViewById(R.id.usageHelpButton).setOnClickListener(view -> showInfo(
+                "使用说明",
+                "首页可查看房间余额并快速充值；点击房间查看近 30 天余额趋势；在首页向右滑，或点击左上角电小侠，即可进入电小侠基地。低余额提醒需先在房间设置中开启监测。"
+        ));
         autoStartConfirmButton.setOnClickListener(view -> {
             boolean confirmed = !setupPreferences.isAutoStartConfirmed();
             setupPreferences.setAutoStartConfirmed(confirmed);
@@ -297,5 +310,14 @@ public final class SystemSettingsActivity extends Activity {
 
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    /** 使用基地同款暖白弹窗，避免系统默认灰色面板破坏深浅主题下的品牌一致性。 */
+    private void showInfo(String title, String message) {
+        new AlertDialog.Builder(this, R.style.BaseDialogTheme)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("知道了", null)
+                .show();
     }
 }

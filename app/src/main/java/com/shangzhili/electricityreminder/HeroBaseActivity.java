@@ -1,5 +1,6 @@
 package com.shangzhili.electricityreminder;
 
+import android.annotation.SuppressLint;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
@@ -8,11 +9,15 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.provider.Settings;
 import android.view.View;
+import android.view.MotionEvent;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.Button;
@@ -34,6 +39,10 @@ public final class HeroBaseActivity extends Activity {
     private TextView versionStatusText;
     private ImageView mascotImage;
     private AnimatorSet mascotIdleAnimator;
+    private int quoteIndex;
+    private float returnSwipeDownX;
+    private float returnSwipeDownY;
+    private boolean returnSwipeConsumed;
 
     @Override protected void attachBaseContext(Context base) {
         super.attachBaseContext(AppThemeManager.wrap(base));
@@ -53,18 +62,9 @@ public final class HeroBaseActivity extends Activity {
         versionStatusText = findViewById(R.id.baseVersionText);
         mascotImage = findViewById(R.id.baseMascotImage);
         mascotImage.setOnClickListener(v -> playMascotReaction());
-        findViewById(R.id.baseBackButton).setOnClickListener(v -> finish());
-        findViewById(R.id.baseThemeButton).setOnClickListener(v -> openSystemSettings());
-        findViewById(R.id.baseSystemButton).setOnClickListener(v -> openSystemSettings());
-        findViewById(R.id.baseUpdateButton).setOnClickListener(v -> {
-            versionStatusText.setText("应用版本\n正在检查");
-            ((ElecApplication) getApplication()).requestManualUpdate(this);
-            queryLatestVersion();
-        });
-        findViewById(R.id.baseDataButton).setOnClickListener(v -> showInfo(
-                "数据与存储", "房间配置、提醒规则和个人历史保存在本机；服务器公共历史仅作为补充。清除应用数据或卸载会删除本地内容。"));
-        findViewById(R.id.baseHelpButton).setOnClickListener(v -> showInfo(
-                "使用说明", "添加房间后可手动查询余额；开启监测后每个整点检查。余额不足会按房间设置的间隔复查并提醒。"));
+        findViewById(R.id.baseBackButton).setOnClickListener(v -> finishWithSlide());
+        findViewById(R.id.baseSettingsButton).setOnClickListener(v -> openSystemSettings());
+        findViewById(R.id.baseAppearanceButton).setOnClickListener(v -> toggleAppearance());
         findViewById(R.id.baseFeedbackButton).setOnClickListener(v -> showFeedbackDialog());
         findViewById(R.id.baseGithubButton).setOnClickListener(v -> startActivity(new Intent(
                 Intent.ACTION_VIEW, Uri.parse("https://github.com/zhisz/jiangli-electricity-manager"))));
@@ -72,6 +72,14 @@ public final class HeroBaseActivity extends Activity {
                 "隐私与数据说明", "App 不需要账号。房间号、别名、阈值和余额不会随反馈上传；反馈仅保存署名、正文、App 版本和服务器接收时间。"));
         ((TextView) findViewById(R.id.baseAboutVersionText)).setText(
                 "当前版本　" + BuildConfig.VERSION_NAME);
+        refreshAppearanceButton();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+ 使用预测性返回回调；系统侧滑返回也能播放基地收回到左侧的过渡。
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    this::finishWithSlide
+            );
+        }
         animateEntrance();
     }
 
@@ -144,6 +152,9 @@ public final class HeroBaseActivity extends Activity {
 
     /** 点击角色时做一次短促起跳，随后自然回到待机循环，形成可互动但不打扰的感觉。 */
     private void playMascotReaction() {
+        // 语录切换属于内容交互，即使用户在系统中关闭了动画也必须生效；只有起跳动作可跳过。
+        quoteIndex = (quoteIndex + 1) % HeroQuotes.size();
+        ((TextView) findViewById(R.id.baseGreetingText)).setText(HeroQuotes.at(quoteIndex));
         if (!animationsEnabled()) return;
         stopMascotAnimation();
         float hop = -18 * getResources().getDisplayMetrics().density;
@@ -206,8 +217,15 @@ public final class HeroBaseActivity extends Activity {
         EditText signature = new EditText(this); signature.setHint("署名（必填）"); signature.setMaxLines(1);
         EditText content = new EditText(this); content.setHint("请写下你的意见或遇到的问题（必填）");
         content.setMinLines(4); content.setMaxLines(8); content.setGravity(android.view.Gravity.TOP);
+        // 弹窗采用固定暖白底，输入文字也使用固定深紫灰，避免深色主题下出现浅字白底。
+        ColorStateList fieldTint = ColorStateList.valueOf(getColor(R.color.purple_primary));
+        for (EditText field : new EditText[]{signature, content}) {
+            field.setTextColor(getColor(R.color.base_dialog_text));
+            field.setHintTextColor(getColor(R.color.base_dialog_muted));
+            field.setBackgroundTintList(fieldTint);
+        }
         form.addView(signature); form.addView(content);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("意见反馈")
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.BaseDialogTheme).setTitle("意见反馈")
                 .setMessage("反馈会发送到开发者后台，不会附带房间信息。")
                 .setView(form).setNegativeButton("取消", null).setPositiveButton("发送", null).create();
         dialog.setOnShowListener(v -> {
@@ -222,7 +240,7 @@ public final class HeroBaseActivity extends Activity {
             new Thread(() -> {
                 try {
                     new FeedbackClient().submit(name, text);
-                    runOnUiThread(() -> { dialog.dismiss(); toast("反馈已送达，谢谢你的署名反馈"); });
+                    runOnUiThread(() -> { dialog.dismiss(); toast("反馈已闪电送达，感谢 " + name + " 的反馈"); });
                 } catch (Exception error) {
                     runOnUiThread(() -> { sendButton.setEnabled(true); sendButton.setText("发送"); toast(error.getMessage()); });
                 }
@@ -233,6 +251,51 @@ public final class HeroBaseActivity extends Activity {
     }
 
     private void openSystemSettings() { startActivity(new Intent(this, SystemSettingsActivity.class)); }
-    private void showInfo(String title, String message) { new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("知道了", null).show(); }
+    private void showInfo(String title, String message) { new AlertDialog.Builder(this, R.style.BaseDialogTheme).setTitle(title).setMessage(message).setPositiveButton("知道了", null).show(); }
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
+
+    private void toggleAppearance() {
+        AppThemeManager.saveAppearance(this, isCurrentlyDark()
+                ? AppThemeManager.APPEARANCE_LIGHT : AppThemeManager.APPEARANCE_DARK);
+        recreate();
+    }
+
+    /** 按钮文字表达“点击后将切换到的模式”，让用户不必猜测太阳图标代表当前还是目标。 */
+    private void refreshAppearanceButton() {
+        Button button = findViewById(R.id.baseAppearanceButton);
+        button.setText(isCurrentlyDark() ? "☀　浅色" : "☾　深色");
+    }
+
+    private boolean isCurrentlyDark() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                returnSwipeDownX = event.getRawX(); returnSwipeDownY = event.getRawY();
+                returnSwipeConsumed = false; break;
+            case MotionEvent.ACTION_MOVE:
+                float dx = event.getRawX() - returnSwipeDownX;
+                float dy = event.getRawY() - returnSwipeDownY;
+                if (!returnSwipeConsumed && dx < -dp(72) && -dx > Math.abs(dy) * 1.7f) {
+                    returnSwipeConsumed = true; finishWithSlide(); return true;
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (returnSwipeConsumed) { returnSwipeConsumed = false; return true; }
+                break;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    /** Android 8～12 的实体/三键返回兼容路径；Android 13+ 已在 onCreate 注册新回调。 */
+    @SuppressLint("GestureBackNavigation")
+    @Override public void onBackPressed() { finishWithSlide(); }
+    private void finishWithSlide() {
+        finish(); overridePendingTransition(R.anim.home_reveal, R.anim.base_exit_to_left);
+    }
+    private float dp(float value) { return value * getResources().getDisplayMetrics().density; }
 }

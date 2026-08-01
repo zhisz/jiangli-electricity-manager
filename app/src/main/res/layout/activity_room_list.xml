@@ -66,8 +66,11 @@
             <Button
                 android:id="@+id/systemSettingsButton"
                 style="@style/Ui.Button.Text"
-                android:layout_width="48dp"
+                android:layout_width="wrap_content"
                 android:layout_height="48dp"
+                android:minWidth="48dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:contentDescription="系统设置"
                 android:text="⚙" />
         </LinearLayout>
