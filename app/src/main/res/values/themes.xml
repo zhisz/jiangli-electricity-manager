@@ -114,4 +114,25 @@
         <item name="android:paddingStart">10dp</item>
         <item name="android:paddingEnd">10dp</item>
     </style>
+
+    <style name="BaseStatusCell" parent="android:style/Widget.TextView">
+        <item name="android:layout_width">0dp</item><item name="android:layout_height">84dp</item>
+        <item name="android:layout_columnWeight">1</item><item name="android:gravity">center</item>
+        <item name="android:background">@drawable/base_card_background</item>
+        <item name="android:textColor">@color/base_text</item><item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingExtra">5dp</item>
+    </style>
+    <style name="BaseToolButton" parent="android:style/Widget.Material.Button">
+        <item name="android:layout_width">match_parent</item><item name="android:layout_height">52dp</item>
+        <item name="android:layout_marginTop">8dp</item><item name="android:background">@drawable/base_tool_background</item>
+        <item name="android:textColor">@color/base_text</item><item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item><item name="android:gravity">center_vertical|start</item>
+        <item name="android:paddingStart">16dp</item><item name="android:paddingEnd">16dp</item>
+        <item name="android:elevation">0dp</item><item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="BaseAboutText" parent="android:style/Widget.TextView">
+        <item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/base_muted</item><item name="android:textSize">14sp</item>
+        <item name="android:paddingTop">6dp</item><item name="android:paddingBottom">6dp</item>
+    </style>
 </resources>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电小侠基地采用独立深紫视觉，但所有内容仍是无需登录的本地控制中心。 -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/base_background" android:fillViewport="true">
+    <LinearLayout android:id="@+id/heroBaseRoot" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:paddingStart="20dp" android:paddingTop="16dp" android:paddingEnd="20dp"
+        android:paddingBottom="32dp">
+        <TextView android:id="@+id/baseBackButton" android:layout_width="48dp" android:layout_height="48dp"
+            android:gravity="center" android:text="‹" android:textColor="@color/base_text"
+            android:textSize="34sp" android:contentDescription="返回" android:clickable="true" android:focusable="true"/>
+        <ImageView android:id="@+id/baseMascotImage" android:layout_width="196dp" android:layout_height="196dp"
+            android:layout_gravity="center_horizontal" android:clickable="true" android:focusable="true"
+            android:scaleType="fitCenter" android:src="@drawable/mascot_base_character"
+            android:contentDescription="会动的电小侠，点击和它互动"/>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:gravity="center" android:text="电小侠基地"
+            android:textColor="@color/base_text" android:textSize="25sp" android:textStyle="bold"/>
+        <TextView android:id="@+id/baseGreetingText" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:gravity="center" android:textColor="@color/base_muted"
+            android:textSize="14sp" android:lineSpacingExtra="3dp"/>
+        <TextView android:id="@+id/baseMascotStateText" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal" android:layout_marginTop="10dp"
+            android:textColor="@color/base_lightning" android:textSize="12sp" android:textStyle="bold"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp"
+            android:text="今日状态" android:textColor="@color/base_text" android:textSize="18sp" android:textStyle="bold"/>
+        <GridLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+            android:columnCount="2" android:rowCount="2" android:useDefaultMargins="true">
+            <TextView android:id="@+id/baseMonitoringText" style="@style/BaseStatusCell" android:text="监测房间\n0"/>
+            <TextView android:id="@+id/baseLowText" style="@style/BaseStatusCell" android:text="余额不足\n0"/>
+            <TextView android:id="@+id/baseSystemText" style="@style/BaseStatusCell" android:text="系统设置\n检查中"/>
+            <TextView android:id="@+id/baseVersionText" style="@style/BaseStatusCell" android:text="应用版本\n检查中"/>
+        </GridLayout>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+            android:text="我的工具" android:textColor="@color/base_text" android:textSize="18sp" android:textStyle="bold"/>
+        <Button android:id="@+id/baseThemeButton" style="@style/BaseToolButton" android:text="主题与外观　›"/>
+        <Button android:id="@+id/baseSystemButton" style="@style/BaseToolButton" android:text="系统监测设置　›"/>
+        <Button android:id="@+id/baseUpdateButton" style="@style/BaseToolButton" android:text="检查应用更新　›"/>
+        <Button android:id="@+id/baseDataButton" style="@style/BaseToolButton" android:text="数据与存储　›"/>
+        <Button android:id="@+id/baseHelpButton" style="@style/BaseToolButton" android:text="使用说明　›"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+            android:text="关于电小侠" android:textColor="@color/base_text" android:textSize="18sp" android:textStyle="bold"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+            android:background="@drawable/base_card_background" android:orientation="vertical" android:padding="16dp">
+            <TextView android:id="@+id/baseAboutVersionText" style="@style/BaseAboutText"/>
+            <TextView style="@style/BaseAboutText" android:text="开发者　zhiSZ"/>
+            <TextView style="@style/BaseAboutText" android:text="联系我　3357627169@qq.com"/>
+        </LinearLayout>
+        <Button android:id="@+id/baseFeedbackButton" style="@style/BaseToolButton" android:text="意见反馈（需署名）　›"/>
+        <Button android:id="@+id/baseGithubButton" style="@style/BaseToolButton" android:text="GitHub 开源地址　›"/>
+        <Button android:id="@+id/basePrivacyButton" style="@style/BaseToolButton" android:text="隐私与数据说明　›"/>
+    </LinearLayout>
+</ScrollView>

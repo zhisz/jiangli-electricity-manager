@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 45,
-  "versionName": "1.5.2",
+  "versionCode": 46,
+  "versionName": "1.6.0",
   "minSupportedVersionCode": 45,
-  "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.5.2.apk",
+  "forceUpdate": false,
+  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.6.0.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "余额趋势辅助线进入页面时默认定位到最新点；趋势卡片新增估算数据说明。本版本必须更新。"
+  "releaseNotes": "新增电小侠基地、动态桌面宠物式角色、今日状态、工具与品牌信息；支持应用内署名反馈并在开发者后台查看。"
 }
