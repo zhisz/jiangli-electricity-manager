@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 49,
-  "versionName": "1.6.3",
-  "minSupportedVersionCode": 49,
+  "versionCode": 50,
+  "versionName": "2.0.0",
+  "minSupportedVersionCode": 50,
   "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.6.3.apk",
+  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.0.0.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "修复在电小侠基地切换深浅主题后返回主页的问题；主题资源重建时保持基地原地展开。本版本为必须更新版本。"
+  "releaseNotes": "备案正式版已启用新包名和专用发布签名。旧调试版用户请立即安装；安装完成后确认新 App 可打开，再手动删除桌面上的旧版。因 Android 安全隔离，房间需要在正式版重新添加。以后版本可直接覆盖更新。"
 }

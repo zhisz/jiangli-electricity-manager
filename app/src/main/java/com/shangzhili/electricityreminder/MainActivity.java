@@ -162,6 +162,7 @@ public final class MainActivity extends Activity {
 
     private void showFirstUseGuideIfNeeded() {
         if (setupPreferences.hasShownOnboarding()) {
+            showFormalReleaseMigrationNoticeIfNeeded();
             return;
         }
         // 先记录“已展示”，避免旋转屏幕或系统重建 Activity 时连续弹出多个对话框。
@@ -176,9 +177,25 @@ public final class MainActivity extends Activity {
                 .create();
         firstUseGuide.setOnDismissListener(dialog -> {
             firstUseGuide = null;
+            showFormalReleaseMigrationNoticeIfNeeded();
             ((ElecApplication) getApplication()).requestUpdateWhenSafe(this);
         });
         firstUseGuide.show();
+    }
+
+    /**
+     * 2.0.0 同时更换包名和正式签名，Android 会把它视为全新应用，旧调试版无法被覆盖。
+     * 提示只显示一次；新用户也能直接理解为“若桌面存在旧版才需处理”，不会被强制操作。
+     */
+    private void showFormalReleaseMigrationNoticeIfNeeded() {
+        if (setupPreferences.hasShownFormalReleaseNotice()) return;
+        setupPreferences.markFormalReleaseNoticeShown();
+        new AlertDialog.Builder(this)
+                .setTitle("已切换到备案正式版")
+                .setMessage("如果桌面上还保留旧调试版“江理电小侠”，请先确认当前正式版可以正常打开，随后手动删除旧版。\n\n"
+                        + "由于 Android 不允许不同包名和签名共享本地数据，正式版需要重新添加房间。以后更新会直接覆盖正式版，不再需要重复迁移。")
+                .setPositiveButton("我知道了", null)
+                .show();
     }
 
     boolean isFirstUseGuideShowing() {

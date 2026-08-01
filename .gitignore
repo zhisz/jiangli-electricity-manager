@@ -1,6 +1,7 @@
 .gradle/
 .idea/
 local.properties
+release-signing.properties
 **/build/
 *.iml
 *.jks
