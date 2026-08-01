@@ -1920,12 +1920,13 @@ def product_page(manifest: dict[str, Any]) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#4e3a78">
+  <meta name="theme-color" content="#201435">
   <meta name="description" content="江理电小侠（南昌校区）：余额查询、低余额提醒与趋势查看。">
   <title>江理电小侠（南昌校区）</title>
   <style>
-    :root {{ --bg:#f7f5fa; --surface:#fff; --ink:#211b2d; --muted:#706879;
-      --brand:#5d477f; --brand-dark:#43305f; --soft:#eee9f5; --line:#e7e1eb;
+    :root {{ --bg:#f7f3eb; --surface:#fffdf9; --ink:#211c2c; --muted:#716a76;
+      --brand:#4d3474; --brand-dark:#201435; --soft:#f0eaf6; --line:#e5dee8;
+      --lightning:#ffd84a; --lightning-hover:#ffca24;
       color-scheme:light; }}
     * {{ box-sizing:border-box; }}
     html {{ scroll-behavior:smooth; }}
@@ -1936,31 +1937,36 @@ def product_page(manifest: dict[str, Any]) -> str:
     .nav {{ height:72px; display:flex; align-items:center; justify-content:space-between; }}
     .brand {{ display:flex; align-items:center; gap:12px; font-weight:800; }}
     .logo {{ width:42px; height:42px; display:block; object-fit:cover; padding:2px;
-      background:#180d3f; border:1px solid #6d59a1; border-radius:13px;
-      box-shadow:0 8px 22px #5d477f25; }}
-    .nav-download,.primary {{ text-decoration:none; color:#fff; background:var(--brand);
-      border-radius:12px; font-weight:800; transition:transform .18s,background .18s; }}
+      background:#180d3f; border:1px solid #6d59a1; border-radius:13px; }}
+    .nav-download,.primary {{ text-decoration:none; border-radius:12px; font-weight:800;
+      transition:transform .18s,background .18s; }}
+    .nav-download {{ color:#fff; background:var(--brand-dark); }}
     .nav-download {{ padding:11px 18px; }}
     .primary {{ display:inline-flex; min-height:54px; align-items:center; padding:0 26px;
-      box-shadow:0 12px 30px #5d477f28; }}
-    .nav-download:hover,.primary:hover {{ background:var(--brand-dark); transform:translateY(-1px); }}
+      color:var(--brand-dark); background:var(--lightning); }}
+    .nav-download:hover {{ background:var(--brand); transform:translateY(-1px); }}
+    .primary:hover {{ background:var(--lightning-hover); transform:translateY(-1px); }}
     .hero {{ min-height:590px; display:grid; grid-template-columns:1.05fr .95fr;
-      align-items:center; gap:68px; padding:54px 0 76px; }}
-    .kicker {{ color:var(--brand); font-weight:800; letter-spacing:.08em; font-size:13px; }}
+      align-items:center; gap:62px; margin-top:18px; padding:58px 64px; color:#fff;
+      background:var(--brand-dark); border:1px solid #382753; border-radius:32px;
+      box-shadow:0 24px 70px #2417351c; }}
+    .kicker {{ color:var(--lightning); font-weight:800; letter-spacing:.08em; font-size:13px; }}
     h1 {{ margin:14px 0 18px; font-size:clamp(38px,6vw,64px); line-height:1.08;
       letter-spacing:-.04em; }}
-    .lead {{ margin:0 0 28px; color:var(--muted); font-size:19px; line-height:1.8; }}
-    .version {{ margin-left:14px; color:var(--muted); font-size:13px; }}
-    .trust {{ display:flex; gap:20px; flex-wrap:wrap; margin-top:22px; color:var(--muted);
+    .hero h1 {{ color:#fff; }}
+    .lead {{ margin:0 0 28px; color:#d9d0e3; font-size:19px; line-height:1.8; }}
+    .version {{ margin-left:14px; color:#b9aec7; font-size:13px; }}
+    .trust {{ display:flex; gap:20px; flex-wrap:wrap; margin-top:22px; color:#d1c7dc;
       font-size:13px; }}
-    .trust span::before {{ content:"✓"; color:var(--brand); font-weight:900; margin-right:6px; }}
+    .trust span::before {{ content:"✓"; color:var(--lightning); font-weight:900; margin-right:6px; }}
     .phone-wrap {{ display:grid; place-items:center; position:relative; }}
     .halo {{ position:absolute; width:380px; height:380px; border-radius:50%;
-      background:#e8e0f1; filter:blur(2px); }}
+      background:#64469a; opacity:.34; filter:blur(8px); }}
     .phone {{ position:relative; width:min(310px,82vw); padding:14px; border-radius:38px;
-      background:#17131d; box-shadow:0 30px 80px #2b203b35; transform:rotate(2deg); }}
+      background:#100b18; border:1px solid #4b3a5b; box-shadow:0 30px 80px #09050f70;
+      transform:rotate(1deg); }}
     .screen {{ min-height:520px; padding:25px 15px 16px; border-radius:27px;
-      background:#f3f0f6; overflow:hidden; }}
+      color:var(--ink); background:#f3f0f6; overflow:hidden; }}
     .screen-head {{ display:flex; justify-content:space-between; align-items:center;
       margin-bottom:15px; font-size:14px; font-weight:800; }}
     .mini-card {{ padding:16px; background:#fff; border:1px solid #ebe6ef;
@@ -1972,7 +1978,7 @@ def product_page(manifest: dict[str, Any]) -> str:
     .amount,.meta {{ color:#81778a; font-size:11px; }}
     .card-actions {{ display:flex; justify-content:space-between; align-items:center;
       margin-top:15px; padding-top:12px; border-top:1px solid #eee9f1; }}
-    .mini-button {{ padding:8px 12px; color:#fff; background:var(--brand); border-radius:9px;
+    .mini-button {{ padding:8px 12px; color:#fff; background:var(--brand-dark); border-radius:9px;
       font-size:11px; font-weight:800; }}
     .chart-head {{ display:flex; align-items:center; justify-content:space-between; }}
     .chart-head b {{ font-size:13px; }} .toggle {{ color:var(--brand); font-size:10px; }}
@@ -1981,28 +1987,30 @@ def product_page(manifest: dict[str, Any]) -> str:
     .chart-line {{ fill:none; stroke:var(--brand); stroke-width:4; stroke-linecap:round;
       stroke-linejoin:round; }}
     .chart-fill {{ fill:url(#area); opacity:.7; }}
-    .section {{ padding:82px 0; }}
+    .section {{ padding:88px 0 78px; }}
     .section h2 {{ margin:0 auto 12px; text-align:center; font-size:34px; }}
     .section-intro {{ max-width:620px; margin:0 auto 40px; text-align:center; color:var(--muted);
       line-height:1.8; }}
     .features {{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }}
-    .feature {{ min-height:190px; padding:25px; background:var(--surface); border:1px solid var(--line);
-      border-radius:20px; }}
+    .feature {{ min-height:190px; padding:25px; background:var(--surface);
+      border:1px solid var(--line); border-radius:20px; }}
     .feature-icon {{ width:46px; height:46px; display:grid; place-items:center; border-radius:14px;
-      background:var(--soft); color:var(--brand); font-size:22px; }}
+      background:#fff1ad; color:var(--brand-dark); font-size:22px; }}
     .feature h3 {{ margin:21px 0 9px; font-size:18px; }}
     .feature p {{ margin:0; color:var(--muted); line-height:1.7; font-size:14px; }}
     .download-card {{ margin-top:72px; padding:42px; display:flex; align-items:center;
       justify-content:space-between; gap:30px; color:#fff; background:var(--brand-dark);
-      border-radius:26px; }}
+      border:1px solid #382753; border-radius:26px; }}
     .download-card h2 {{ margin:0 0 8px; text-align:left; font-size:30px; }}
     .download-card p {{ margin:0; color:#ded3e9; }}
-    .download-card .primary {{ flex:none; color:var(--brand-dark); background:#fff; box-shadow:none; }}
+    .download-card .primary {{ flex:none; color:var(--brand-dark);
+      background:var(--lightning); box-shadow:none; }}
     .footer {{ padding:26px 0 44px; border-top:1px solid var(--line); color:var(--muted);
       text-align:center; font-size:12px; }}
     @media(max-width:760px) {{
       .nav {{ height:64px; }} .nav-download {{ padding:9px 13px; font-size:13px; }}
-      .hero {{ grid-template-columns:1fr; gap:52px; padding:40px 0 64px; text-align:center; }}
+      .hero {{ width:calc(100% - 24px); grid-template-columns:1fr; gap:52px;
+        margin-top:8px; padding:42px 22px 52px; text-align:center; border-radius:24px; }}
       .lead {{ font-size:16px; }} .trust {{ justify-content:center; }}
       .features {{ grid-template-columns:1fr; }} .feature {{ min-height:0; }}
       .section {{ padding:60px 0; }} .download-card {{ padding:30px 24px; text-align:center;
