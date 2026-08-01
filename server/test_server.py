@@ -238,7 +238,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_product_page_uses_stable_download_link(self):
         page = app_server.product_page({"versionName": "1.3.0"})
-        self.assertIn("江理电费管家", page)
+        self.assertIn("江理电小侠", page)
+        self.assertIn("/assets/mascot-app-icon.png", page)
         self.assertIn("/downloads/latest.apk", page)
         self.assertNotIn("electricity-reminder-1.3.0.apk", page)
         self.assertIn("1.3.0", page)

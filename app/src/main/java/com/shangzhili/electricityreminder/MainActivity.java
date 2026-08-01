@@ -128,7 +128,7 @@ public final class MainActivity extends Activity {
                 .setTitle("首次使用设置")
                 .setMessage("为了在 App 退出后仍能按时提醒，需要检查通知权限、精确闹钟、"
                         + "电池优化和厂商自启动。\n\n"
-                        + "江理电费管家会逐项显示当前状态，并提供对应的系统设置入口。")
+                        + "江理电小侠会逐项显示当前状态，并提供对应的系统设置入口。")
                 .setNegativeButton("稍后", null)
                 .setPositiveButton("检查并设置", (dialog, which) -> openSystemSettings())
                 .create();

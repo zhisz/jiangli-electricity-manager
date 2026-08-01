@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 42,
-  "versionName": "1.4.0",
+  "versionCode": 43,
+  "versionName": "1.5.0",
   "minSupportedVersionCode": 42,
-  "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.4.0.apk",
+  "forceUpdate": false,
+  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.5.0.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "详情页精简为当前余额和余额趋势两张卡片；移除每日消耗、月度统计和充值记录入口；首页房间卡新增电费充值快捷操作；官网新增固定产品介绍及最新版下载入口。"
+  "releaseNotes": "余额趋势辅助线支持近线跟手拖动并显示当前数值；应用正式更名为江理电小侠并启用电击小子图标；产品介绍页同步新品牌。"
 }

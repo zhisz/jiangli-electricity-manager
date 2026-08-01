@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 启动器和系统设置使用简短正式名称；首页标题额外标明服务校区。 -->
-    <string name="app_name">江理电费管家</string>
-    <string name="app_home_title">江理电费管家（南昌校区）</string>
+    <string name="app_name">江理电小侠</string>
+    <string name="app_home_title">江理电小侠（南昌校区）</string>
     <string name="developer_signature">开发者 zhiSZ</string>
     <string name="feedback_email">反馈邮箱：3357627169@qq.com</string>
     <string name="feedback_email_address">3357627169@qq.com</string>
-    <string name="feedback_email_subject">江理电费管家反馈</string>
+    <string name="feedback_email_subject">江理电小侠反馈</string>
     <string name="online_recharge_button">电费充值</string>
     <string name="recharge_amount_hint">输入充值金额</string>
     <string name="recharge_amount_range_hint">输入金额（%1$s–%2$s）</string>

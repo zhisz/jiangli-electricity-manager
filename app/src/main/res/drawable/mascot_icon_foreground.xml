@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景额外留出 8% 安全边距，避免部分桌面使用圆形或水滴形蒙版时
+  裁掉角色头顶闪电。边距之外使用与原图边缘接近的深紫色背景自然衔接。
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/mascot_app_icon"
+    android:inset="8%" />

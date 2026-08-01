@@ -21,6 +21,21 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!--
+              角色图标只作为品牌识别点出现一次；不在每张房间卡重复铺陈，保持工具页克制。
+              clipToOutline 让方形原画在这里成为柔和圆角徽章，且不会影响启动器图标资源。
+            -->
+            <ImageView
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_marginEnd="@dimen/space_3"
+                android:background="@drawable/mascot_badge_background"
+                android:clipToOutline="true"
+                android:contentDescription="电击小子图标"
+                android:padding="2dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/mascot_app_icon" />
+
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -31,7 +46,10 @@
                     style="@style/Ui.Text.PageTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/app_home_title" />
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/app_home_title"
+                    android:textSize="18sp" />
 
                 <TextView
                     android:id="@+id/roomCountText"
@@ -45,9 +63,10 @@
             <Button
                 android:id="@+id/systemSettingsButton"
                 style="@style/Ui.Button.Text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="● 设置" />
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="系统设置"
+                android:text="⚙" />
         </LinearLayout>
 
         <Button

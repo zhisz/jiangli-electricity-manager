@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""江理电费管家更新、匿名统计与公共房间历史服务。
+"""江理电小侠更新、匿名统计与公共房间历史服务。
 
 只使用 Python 标准库，监听 127.0.0.1，由 Nginx 反向代理。匿名统计库不会存储 Android
 ID、房间配置、手机号或设备硬件标识；客户端摘要还会再经过服务器 HMAC。独立公共历史库
@@ -1125,7 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; "
+                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
                 f"form-action 'self'; connect-src 'self';{script_policy} base-uri 'none'; "
                 "frame-ancestors 'none'",
             )
@@ -1152,7 +1152,7 @@ def login_page(error: str = "", notice: str = "") -> str:
         f"""
         <main class="login-wrap">
           <section class="login-card">
-            <div class="eyebrow">江理电费管家</div>
+            <div class="eyebrow">江理电小侠</div>
             <h1>开发者后台</h1>
             <p class="muted">请输入服务器管理员密码。连续失败会触发临时限制。</p>
             {notice_html}
@@ -1253,7 +1253,7 @@ def dashboard_page(
         <header class="topbar">
           <div>
             <div class="eyebrow">ELEC CONSOLE</div>
-            <h1>江理电费管家</h1>
+            <h1>江理电小侠</h1>
             <p class="muted">匿名使用概览 · 中国标准时间</p>
           </div>
           <div class="header-actions">
@@ -1334,7 +1334,7 @@ def dashboard_page(
             </article>
           </section>
         </main>
-        <footer>江理电费管家开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
+        <footer>江理电小侠开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
         """,
     )
 
@@ -1921,8 +1921,8 @@ def product_page(manifest: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#4e3a78">
-  <meta name="description" content="江理电费管家（南昌校区）：余额查询、低余额提醒与趋势查看。">
-  <title>江理电费管家（南昌校区）</title>
+  <meta name="description" content="江理电小侠（南昌校区）：余额查询、低余额提醒与趋势查看。">
+  <title>江理电小侠（南昌校区）</title>
   <style>
     :root {{ --bg:#f7f5fa; --surface:#fff; --ink:#211b2d; --muted:#706879;
       --brand:#5d477f; --brand-dark:#43305f; --soft:#eee9f5; --line:#e7e1eb;
@@ -1935,9 +1935,9 @@ def product_page(manifest: dict[str, Any]) -> str:
     .nav,.hero,.section,.footer {{ width:min(1080px,calc(100% - 40px)); margin:auto; }}
     .nav {{ height:72px; display:flex; align-items:center; justify-content:space-between; }}
     .brand {{ display:flex; align-items:center; gap:12px; font-weight:800; }}
-    .logo {{ width:42px; height:42px; display:grid; place-items:center; color:#fff;
-      background:var(--brand); border-radius:13px; box-shadow:0 8px 22px #5d477f25; }}
-    .logo svg {{ width:24px; }}
+    .logo {{ width:42px; height:42px; display:block; object-fit:cover; padding:2px;
+      background:#180d3f; border:1px solid #6d59a1; border-radius:13px;
+      box-shadow:0 8px 22px #5d477f25; }}
     .nav-download,.primary {{ text-decoration:none; color:#fff; background:var(--brand);
       border-radius:12px; font-weight:800; transition:transform .18s,background .18s; }}
     .nav-download {{ padding:11px 18px; }}
@@ -2013,7 +2013,7 @@ def product_page(manifest: dict[str, Any]) -> str:
 </head>
 <body>
   <nav class="nav" aria-label="主导航">
-    <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M13.2 2 5.8 13h5L9.9 22l8.3-12h-5.1l.1-8Z" fill="currentColor"/></svg></span><span>江理电费管家</span></div>
+    <div class="brand"><img class="logo" src="/assets/mascot-app-icon.png" alt=""><span>江理电小侠</span></div>
     <a class="nav-download" href="#download">下载应用</a>
   </nav>
   <main>
@@ -2056,7 +2056,7 @@ def product_page(manifest: dict[str, Any]) -> str:
         <article class="feature"><div class="feature-icon">¥</div><h3>快捷充值</h3><p>首页一键进入电费充值，付款仍由微信与校付宝官方链路完成。</p></article>
       </div>
       <div class="download-card" id="download">
-        <div><h2>开始使用江理电费管家</h2><p>仅支持江西理工大学南昌校区 · Android 8.0 及以上</p></div>
+        <div><h2>开始使用江理电小侠</h2><p>仅支持江西理工大学南昌校区 · Android 8.0 及以上</p></div>
         <a class="primary" href="/downloads/latest.apk">立即下载最新版</a>
       </div>
     </section>
@@ -2081,7 +2081,7 @@ def page_shell(title: str, content: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{html.escape(title)} · 江理电费管家</title>
+  <title>{html.escape(title)} · 江理电小侠</title>
   <style>
     :root {{
       color-scheme: light dark;
