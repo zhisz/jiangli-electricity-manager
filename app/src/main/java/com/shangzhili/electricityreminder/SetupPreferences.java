@@ -21,6 +21,14 @@ public final class SetupPreferences {
         preferences.edit().putBoolean("onboardingShown", true).apply();
     }
 
+    public boolean hasShownFormalReleaseNotice() {
+        return preferences.getBoolean("formalReleaseNoticeShown", false);
+    }
+
+    public void markFormalReleaseNoticeShown() {
+        preferences.edit().putBoolean("formalReleaseNoticeShown", true).apply();
+    }
+
     public boolean isAutoStartConfirmed() {
         return preferences.getBoolean("autoStartConfirmed", false);
     }

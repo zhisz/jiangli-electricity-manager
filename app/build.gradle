@@ -25,23 +25,45 @@ def updateManifestUrl = javaString(privateSetting("UPDATE_MANIFEST_URL"))
 def elecServiceBaseUrl = javaString(privateSetting("ELEC_SERVICE_BASE_URL"))
 def xiaofubaoShiroJid = javaString(privateSetting("XIAOFUBAO_SHIRO_JID"))
 
+/*
+ * 正式签名参数只从被 Git 忽略的本地文件读取。密钥库本体位于仓库之外；公开源码和
+ * 服务器只会拿到签名后的 APK，永远不会包含私钥或密码。
+ */
+def releaseSigning = new Properties()
+def releaseSigningFile = rootProject.file("release-signing.properties")
+if (releaseSigningFile.isFile()) {
+    releaseSigningFile.withInputStream { releaseSigning.load(it) }
+}
+
 android {
     namespace = "com.shangzhili.electricityreminder"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.shangzhili.electricityreminder"
+        applicationId = "com.zhisz.electricityreminder"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
-        versionName = "1.6.3"
+        versionCode = 50
+        versionName = "2.0.0"
         buildConfigField "String", "UPDATE_MANIFEST_URL", "\"${updateManifestUrl}\""
         buildConfigField "String", "ELEC_SERVICE_BASE_URL", "\"${elecServiceBaseUrl}\""
         buildConfigField "String", "XIAOFUBAO_SHIRO_JID", "\"${xiaofubaoShiroJid}\""
     }
 
+    signingConfigs {
+        release {
+            if (releaseSigningFile.isFile()) {
+                storeFile = file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseSigningFile.isFile()) signingConfig = signingConfigs.release
             minifyEnabled = false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
