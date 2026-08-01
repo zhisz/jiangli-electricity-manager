@@ -75,7 +75,8 @@ public final class RoomRepository {
                 preferences.getString(key(roomId, "metric"), "amount"),
                 readDouble(key(roomId, "threshold"), 20),
                 readDouble(key(roomId, "recoveryThreshold"), 25),
-                readDouble(key(roomId, "repeatMinutes"), 2_880),
+                // 仅当字段确实缺失或损坏时使用 60 分钟；已保存的用户设置原样保留。
+                readDouble(key(roomId, "repeatMinutes"), AppConfig.DEFAULT_REPEAT_MINUTES),
                 readCheckTimes(roomId)
         );
     }

@@ -11,6 +11,14 @@ import java.util.List;
  * 前缀，所以配置中只保留 roomCode，避免用户重复输入同一串数字。</p>
  */
 public final class AppConfig {
+    /**
+     * 新房间的低余额复查默认间隔。
+     *
+     * <p>60 分钟能在提醒及时性与后台耗电之间取得更合理的平衡；该常量只用于创建
+     * 新配置和配置字段缺失时的回退，不覆盖用户已经保存过的自定义间隔。</p>
+     */
+    public static final double DEFAULT_REPEAT_MINUTES = 60;
+
     /** 当前接口的房间码结构：9 位楼栋 + 3 位楼层 + 3 位房间，共 15 位。 */
     private static final int ROOM_CODE_LENGTH = 15;
     private static final int BUILDING_CODE_LENGTH = 9;
