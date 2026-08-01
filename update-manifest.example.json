@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 44,
-  "versionName": "1.5.1",
-  "minSupportedVersionCode": 42,
-  "forceUpdate": false,
-  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.5.1.apk",
+  "versionCode": 45,
+  "versionName": "1.5.2",
+  "minSupportedVersionCode": 45,
+  "forceUpdate": true,
+  "apkUrl": "https://your-domain.example/downloads/electricity-reminder-1.5.2.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "修复新房间低余额复查默认间隔过长的问题，默认调整为60分钟；已保存的自定义间隔保持不变。"
+  "releaseNotes": "余额趋势辅助线进入页面时默认定位到最新点；趋势卡片新增估算数据说明。本版本必须更新。"
 }

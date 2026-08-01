@@ -169,8 +169,8 @@
     </LinearLayout>
 
     <!--
-      趋势图占满余额卡片之后的剩余空间。标题区仅保留名称和“度/元”切换；
-      采样详情由图内点选反馈表达，不再长期摆放说明段落。
+      趋势图占满余额卡片之后的剩余空间。标题区保留名称和“度/元”切换，并用一行
+      低干扰说明明确数据属于估算，避免用户把预测曲线误认为平台实时余额。
     -->
     <LinearLayout
         android:id="@+id/chartCard"
@@ -220,11 +220,19 @@
             </RadioGroup>
         </LinearLayout>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_1"
+            android:text="趋势根据采样数据估算，可能与平台实际余额存在偏差"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+
         <LinearLayout
             android:id="@+id/balanceTrendContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="@dimen/space_2"
+            android:layout_marginTop="@dimen/space_1"
             android:layout_weight="1"
             android:gravity="top"
             android:orientation="horizontal">
