@@ -36,6 +36,7 @@ class CollectorAdminParameterTests(unittest.TestCase):
             "/admin/collector/events?date=2026-07-31&buildingCode=001001001"
             "&roomCode=001001001003305&eventType=%E5%85%85%E5%80%BC"
             "&sort=recharge_amount_desc&pageSize=500&page=3&snapshot=1200"
+            "&intervalEnd=24"
         )
         self.assertEqual("2026-07-31", parameters["day"])
         self.assertEqual("001001001", parameters["building_code"])
@@ -44,12 +45,13 @@ class CollectorAdminParameterTests(unittest.TestCase):
         self.assertEqual(500, parameters["events"]["page_size"])
         self.assertEqual(3, parameters["events"]["page"])
         self.assertEqual(1200, parameters["events"]["snapshot_id"])
+        self.assertEqual(24, parameters["interval_end_hour"])
 
     def test_invalid_sort_page_size_and_codes_fall_back_safely(self):
         parameters = app_server._collector_parameters(
             "/admin/collector/events?buildingCode=1%20OR%201%3D1"
             "&roomCode=not-a-room&sort=current_query_time%20DROP%20TABLE"
-            "&pageSize=99999&intervalEnd=7"
+            "&pageSize=99999&intervalEnd=25"
         )
         self.assertEqual("", parameters["building_code"])
         self.assertEqual("", parameters["room_code"])
@@ -73,8 +75,8 @@ class CollectorAdminParameterTests(unittest.TestCase):
     def test_distribution_keeps_only_counts_and_event_categories(self):
         intervals = [
             {
-                "start_hour": hour,
-                "end_hour": hour + 1,
+                "start_hour": (end_hour - 1) % 24,
+                "end_hour": 24 if end_hour == 0 else end_hour,
                 "total_count": 600 if hour == 17 else 0,
                 "recharge_count": 0,
                 "consumption_count": 600 if hour == 17 else 0,
@@ -82,7 +84,8 @@ class CollectorAdminParameterTests(unittest.TestCase):
                 "total_delta_kwh": -123.4,
                 "total_delta_amount": -74.04,
             }
-            for hour in range(8, 20)
+            for end_hour in range(24)
+            for hour in [(end_hour - 1) % 24]
         ]
         fragment = app_server.collector_distribution_fragment(
             {
@@ -92,12 +95,13 @@ class CollectorAdminParameterTests(unittest.TestCase):
             }
         )
         self.assertIn("17:00–18:00", fragment)
+        self.assertIn("23:00–00:00", fragment)
         self.assertIn("消耗 600", fragment)
         self.assertIn("充值 0", fragment)
         self.assertNotIn("-123.4", fragment)
         self.assertNotIn("-74.04", fragment)
 
-    def test_task_metrics_use_current_round_scope(self):
+    def test_task_metrics_separate_retained_and_current_round_scope(self):
         fragment = app_server.collector_task_fragment({
             "latest_job": {
                 "total_rooms": 1412, "processed_rooms": 1412,
@@ -108,14 +112,17 @@ class CollectorAdminParameterTests(unittest.TestCase):
                 "finished_at": "2026-07-31T18:06:41+08:00",
             },
             "current_round": 11, "round_total": 13,
-            "total_samples": 14120, "database_bytes": 1024,
+            "total_samples": 14120, "total_failure_samples": 7,
+            "database_bytes": 1024,
             "current_building": "本轮已完成", "no_meter_count": 0,
             "covered_buildings": 12, "valid_rooms": 1412,
             "buildings": [], "failures": [],
         })
-        self.assertIn("本轮应采", fragment)
+        self.assertIn("总采集数", fragment)
+        self.assertIn("总失败数", fragment)
         self.assertIn("本轮成功", fragment)
-        self.assertIn("近30天累计 14120 条样本", fragment)
+        self.assertIn("14120", fragment)
+        self.assertIn("统计范围为服务器最近30天", fragment)
         self.assertNotIn("样本总数", fragment)
 
 
@@ -221,6 +228,24 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(old_apk.name, filename)
         self.assertEqual(0, version_code)
         self.assertEqual(old_apk, path)
+
+    def test_stable_latest_download_always_resolves_current_manifest(self):
+        service = app_server.ElecService(self.settings)
+        filename, version_code, path = service.available_download("latest.apk")
+        self.assertEqual("electricity-reminder-0.15.0.apk", filename)
+        self.assertEqual(22, version_code)
+        self.assertTrue(path.is_file())
+
+    def test_product_page_uses_stable_download_link(self):
+        page = app_server.product_page({"versionName": "1.3.0"})
+        self.assertIn("江理电小侠", page)
+        self.assertIn("/assets/mascot-app-icon.png", page)
+        self.assertIn("/downloads/latest.apk", page)
+        # 产品页文案直接回应学生常见的断电与充值入口难找问题，避免后续改版时退回功能罗列。
+        self.assertIn("别等突然停电", page)
+        self.assertIn("想充值，却想不起入口在哪", page)
+        self.assertNotIn("electricity-reminder-1.3.0.apk", page)
+        self.assertIn("1.3.0", page)
 
     def test_signed_session_rejects_tampering_and_expiry(self):
         service = app_server.ElecService(self.settings)

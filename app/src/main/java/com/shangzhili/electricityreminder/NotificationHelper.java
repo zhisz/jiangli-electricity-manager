@@ -112,7 +112,7 @@ public final class NotificationHelper {
         String body = info.isMandatoryFor(BuildConfig.VERSION_CODE)
                 ? "版本 " + info.versionName + " 必须更新，点击打开应用并下载安装。"
                 : "版本 " + info.versionName + " 已发布，点击打开应用查看更新内容。";
-        if (show(9_001, null, "江理电费管家有新版本", body, UPDATE_CHANNEL)) {
+        if (show(9_001, null, "江理电小侠有新版本", body, UPDATE_CHANNEL)) {
             preferences.edit().putInt("notifiedVersionCode", info.versionCode).apply();
         }
     }

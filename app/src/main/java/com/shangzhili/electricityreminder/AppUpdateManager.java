@@ -232,7 +232,7 @@ public final class AppUpdateManager {
                     info.versionCode, System.currentTimeMillis()
             );
             DownloadManager.Request request = new DownloadManager.Request(apkUri)
-                    .setTitle("江理电费管家 " + info.versionName)
+                    .setTitle("江理电小侠 " + info.versionName)
                     .setDescription("正在下载应用更新")
                     .setMimeType("application/vnd.android.package-archive")
                     // 下载指标使用与启动心跳一致的匿名设备摘要做去重；服务器看不到
@@ -375,7 +375,7 @@ public final class AppUpdateManager {
     private void showInstallPermissionDialog(boolean mandatory) {
         AlertDialog.Builder builder = new AlertDialog.Builder(activity)
                 .setTitle("允许安装应用更新")
-                .setMessage("Android 需要先允许江理电费管家安装此来源的更新。授权后会再次提示安装。")
+                .setMessage("Android 需要先允许江理电小侠安装此来源的更新。授权后会再次提示安装。")
                 .setPositiveButton("前往授权", (dialog, which) -> {
                     Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
                             .setData(Uri.parse("package:" + activity.getPackageName()));

@@ -6,10 +6,13 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -36,6 +39,8 @@ public final class ElectricityTrendView extends View {
     private final Paint areaPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint confidencePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint selectionPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint cursorLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint cursorValuePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path estimatePath = new Path();
     private final Path areaPath = new Path();
@@ -48,11 +53,18 @@ public final class ElectricityTrendView extends View {
     /** HorizontalScrollView 实际可见宽度，用于严格换算“一个视口约 7 天”。 */
     private int viewportWidth;
     private int selectedIndex = -1;
+    /** 游标横坐标使用内容 View 坐标，拖动时不吸附，辅助线才能真正跟手。 */
+    private float cursorX = Float.NaN;
+    private float touchDownX;
+    private float touchDownY;
+    private boolean draggingCursor;
+    private final int touchSlop;
     private OnTrendPointSelectedListener listener;
 
     public ElectricityTrendView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setClickable(true);
+        touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         int primary = AppThemeManager.color(context, R.attr.uiPrimary);
         axisPaint.setColor(context.getColor(R.color.border));
         axisPaint.setStrokeWidth(dp(1));
@@ -74,6 +86,12 @@ public final class ElectricityTrendView extends View {
         confidencePaint.setStyle(Paint.Style.FILL);
         selectionPaint.setColor(withAlpha(primary, 0x66));
         selectionPaint.setStrokeWidth(dp(1.5f));
+        cursorLabelPaint.setColor(withAlpha(primary, 0xEE));
+        cursorLabelPaint.setStyle(Paint.Style.FILL);
+        cursorValuePaint.setColor(Color.WHITE);
+        cursorValuePaint.setTextSize(dp(11.5f));
+        cursorValuePaint.setTypeface(Typeface.DEFAULT_BOLD);
+        cursorValuePaint.setTextAlign(Paint.Align.CENTER);
         textPaint.setColor(context.getColor(R.color.text_secondary));
         textPaint.setTextSize(dp(10.5f));
     }
@@ -97,6 +115,7 @@ public final class ElectricityTrendView extends View {
         points.clear();
         if (trendPoints != null) points.addAll(trendPoints);
         selectedIndex = -1;
+        cursorX = Float.NaN;
         updateContentDescription();
         requestLayout();
         invalidate();
@@ -196,9 +215,13 @@ public final class ElectricityTrendView extends View {
         canvas.drawPath(estimatePath, glowPaint);
         canvas.drawPath(estimatePath, estimatePaint);
 
-        if (selectedIndex >= 0 && selectedIndex < points.size()) {
-            canvas.drawLine(x[selectedIndex], top, x[selectedIndex], bottom, selectionPaint);
-            canvas.drawCircle(x[selectedIndex], estimateY[selectedIndex], dp(5.5f), selectionPaint);
+        if (selectedIndex >= 0 && selectedIndex < points.size() && Float.isFinite(cursorX)) {
+            float activeX = Math.max(left, Math.min(right, cursorX));
+            double activeValue = TrendCursorMath.interpolate(activeX, x, smoothedValues);
+            float activeY = yOf(activeValue, scale[0], range, top, bottom);
+            canvas.drawLine(activeX, top, activeX, bottom, selectionPaint);
+            canvas.drawCircle(activeX, activeY, dp(5.5f), selectionPaint);
+            drawCursorValue(canvas, activeX, activeY, activeValue, left, right, top, bottom);
         }
         drawTimeLabels(canvas, startTime, endTime, left, right);
     }
@@ -332,29 +355,134 @@ public final class ElectricityTrendView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getActionMasked() == MotionEvent.ACTION_UP && !points.isEmpty()) {
-            performClick();
-            float left = dp(8);
-            float right = getWidth() - dp(10);
-            float fraction = Math.max(0, Math.min(1, (event.getX() - left) / (right - left)));
+        if (points.isEmpty()) return false;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                touchDownX = event.getX();
+                touchDownY = event.getY();
+                /*
+                 * 只有从既有辅助线左右 28dp 内按下才锁定游标。没有命中时不禁止
+                 * HorizontalScrollView 拦截，用户仍能自然地左右浏览完整 30 天时间轴。
+                 */
+                draggingCursor = TrendCursorMath.isDragStart(
+                        event.getX(), cursorX, dp(28)
+                );
+                if (draggingCursor) {
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    moveCursorTo(event.getX(), true);
+                }
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (draggingCursor) {
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    moveCursorTo(event.getX(), true);
+                }
+                // 非游标手势继续允许父级在超过 touchSlop 后接管横向滚动。
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (draggingCursor) {
+                    moveCursorTo(event.getX(), true);
+                    finishCursorGesture();
+                    return true;
+                }
+                float moved = (float) Math.hypot(
+                        event.getX() - touchDownX, event.getY() - touchDownY
+                );
+                if (moved <= touchSlop) {
+                    performClick();
+                    // 普通点击仍吸附到最近采样点，随后可从辅助线附近开始连续拖动。
+                    moveCursorTo(event.getX(), false);
+                    notifySelection();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                finishCursorGesture();
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * 拖动时 cursorX 保持手指的连续位置；普通点击则放到最近真实采样点上。
+     * selectedIndex 始终同步最近采样，用于无障碍播报及兼容原有监听接口。
+     */
+    private void moveCursorTo(float requestedX, boolean continuous) {
+        float left = dp(8);
+        float right = getWidth() - dp(10);
+        float safeX = Math.max(left, Math.min(right, requestedX));
+        selectedIndex = nearestPointIndex(safeX, left, right);
+        if (continuous) {
+            cursorX = safeX;
+        } else {
             long start = points.get(0).reading.timestamp;
             long end = points.get(points.size() - 1).reading.timestamp;
-            long target = start + (long) ((end - start) * fraction);
-            int nearest = 0;
-            long distance = Long.MAX_VALUE;
-            for (int i = 0; i < points.size(); i++) {
-                long next = Math.abs(points.get(i).reading.timestamp - target);
-                if (next < distance) {
-                    distance = next;
-                    nearest = i;
-                }
-            }
-            selectedIndex = nearest;
-            invalidate();
-            if (listener != null) listener.onSelected(points.get(nearest));
-            return true;
+            cursorX = xOf(
+                    points.get(selectedIndex).reading.timestamp,
+                    start, Math.max(1, end - start), left, right
+            );
         }
-        return true;
+        invalidate();
+    }
+
+    private int nearestPointIndex(float x, float left, float right) {
+        float fraction = Math.max(0, Math.min(1, (x - left) / Math.max(1, right - left)));
+        long start = points.get(0).reading.timestamp;
+        long end = points.get(points.size() - 1).reading.timestamp;
+        long target = start + (long) ((end - start) * fraction);
+        int nearest = 0;
+        long distance = Long.MAX_VALUE;
+        for (int i = 0; i < points.size(); i++) {
+            long next = Math.abs(points.get(i).reading.timestamp - target);
+            if (next < distance) {
+                distance = next;
+                nearest = i;
+            }
+        }
+        return nearest;
+    }
+
+    private void finishCursorGesture() {
+        if (draggingCursor) notifySelection();
+        draggingCursor = false;
+        getParent().requestDisallowInterceptTouchEvent(false);
+    }
+
+    private void notifySelection() {
+        if (selectedIndex < 0 || selectedIndex >= points.size()) return;
+        if (listener != null) listener.onSelected(points.get(selectedIndex));
+        setContentDescription(String.format(
+                Locale.CHINA, "当前趋势值 %.2f%s",
+                estimatedValue(points.get(selectedIndex)), showAmount ? "元" : "度"
+        ));
+    }
+
+    /**
+     * 数值标签跟随曲线交点移动，并在左右、上下边缘自动避让。深紫底与白字保持清晰，
+     * 但尺寸仅容纳一个数值，不在图中重新堆叠日期和说明文字。
+     */
+    private void drawCursorValue(
+            Canvas canvas, float x, float y, double value,
+            float left, float right, float top, float bottom
+    ) {
+        String label = String.format(
+                Locale.CHINA, "%.2f %s", value, showAmount ? "元" : "度"
+        );
+        float horizontalPadding = dp(9);
+        float bubbleWidth = cursorValuePaint.measureText(label) + horizontalPadding * 2;
+        float bubbleHeight = dp(28);
+        float bubbleLeft = Math.max(
+                left, Math.min(right - bubbleWidth, x - bubbleWidth / 2)
+        );
+        float bubbleTop = y - bubbleHeight - dp(10);
+        if (bubbleTop < top) bubbleTop = Math.min(bottom - bubbleHeight, y + dp(10));
+        RectF bubble = new RectF(
+                bubbleLeft, bubbleTop, bubbleLeft + bubbleWidth, bubbleTop + bubbleHeight
+        );
+        canvas.drawRoundRect(bubble, dp(9), dp(9), cursorLabelPaint);
+        Paint.FontMetrics metrics = cursorValuePaint.getFontMetrics();
+        float baseline = bubble.centerY() - (metrics.ascent + metrics.descent) / 2;
+        canvas.drawText(label, bubble.centerX(), baseline, cursorValuePaint);
     }
 
     @Override

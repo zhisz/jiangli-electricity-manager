@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""江理电费管家更新、匿名统计与公共房间历史服务。
+"""江理电小侠更新、匿名统计与公共房间历史服务。
 
 只使用 Python 标准库，监听 127.0.0.1，由 Nginx 反向代理。匿名统计库不会存储 Android
 ID、房间配置、手机号或设备硬件标识；客户端摘要还会再经过服务器 HMAC。独立公共历史库
@@ -503,6 +503,10 @@ class ElecService:
         """允许仍持有旧清单的客户端完成旧版下载，同时只统计当前最新版指标。"""
 
         current_name, current_code, current_path = self.current_download()
+        # latest.apk 是对外分享的稳定入口。它在每次请求时解析更新清单，因此服务器
+        # 清理旧 APK 或发布新版本后，产品页和历史分享链接都不会失效。
+        if requested == "latest.apk":
+            return current_name, current_code, current_path
         if requested == current_name:
             return current_name, current_code, current_path
         old_path = self.settings.download_dir / requested
@@ -608,6 +612,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path.startswith("/downloads/"):
             self._download(path, count=False)
+        elif path in {"/", "/download"}:
+            self._send_bytes(HTTPStatus.OK, b"", "text/html; charset=utf-8")
         elif path == "/healthz":
             self._send_bytes(HTTPStatus.OK, b"", "text/plain; charset=utf-8")
         else:
@@ -617,6 +623,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
+        elif path in {"/", "/download"}:
+            try:
+                self._send_html(
+                    HTTPStatus.OK, product_page(self.service.load_manifest())
+                )
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                # 产品介绍页即使暂时读不到清单也应可访问；按钮仍指向稳定下载入口，
+                # 下载服务恢复后无需重新生成页面或更换分享链接。
+                self._send_html(HTTPStatus.OK, product_page({}))
         elif path == "/api/v1/public-history":
             self._public_history()
         elif path == "/admin":
@@ -857,7 +872,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(
                 "Content-Type", "application/vnd.android.package-archive"
             )
-            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
+            self.send_header(
+                "Cache-Control",
+                "no-store" if requested == "latest.apk"
+                else "public, max-age=31536000, immutable",
+            )
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             # 直连开发端口测试时没有 Nginx 消费 X-Accel-Redirect，主动关闭连接可避免
@@ -1103,7 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; "
+                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
                 f"form-action 'self'; connect-src 'self';{script_policy} base-uri 'none'; "
                 "frame-ancestors 'none'",
             )
@@ -1130,7 +1152,7 @@ def login_page(error: str = "", notice: str = "") -> str:
         f"""
         <main class="login-wrap">
           <section class="login-card">
-            <div class="eyebrow">江理电费管家</div>
+            <div class="eyebrow">江理电小侠</div>
             <h1>开发者后台</h1>
             <p class="muted">请输入服务器管理员密码。连续失败会触发临时限制。</p>
             {notice_html}
@@ -1231,7 +1253,7 @@ def dashboard_page(
         <header class="topbar">
           <div>
             <div class="eyebrow">ELEC CONSOLE</div>
-            <h1>江理电费管家</h1>
+            <h1>江理电小侠</h1>
             <p class="muted">匿名使用概览 · 中国标准时间</p>
           </div>
           <div class="header-actions">
@@ -1312,7 +1334,7 @@ def dashboard_page(
             </article>
           </section>
         </main>
-        <footer>江理电费管家开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
+        <footer>江理电小侠开发者后台 · 版本维护、匿名统计与公共房间采样</footer>
         """,
     )
 
@@ -1352,8 +1374,10 @@ def _collector_parameters(path_with_query: str) -> dict[str, Any]:
     page_size = _bounded_int(query.get("pageSize", ["100"])[0], 100, 1, 1_000_000)
     if page_size not in EVENT_PAGE_SIZES:
         page_size = 100
-    interval_end = _bounded_int(query.get("intervalEnd", ["0"])[0], 0, 0, 20)
-    if interval_end not in range(9, 21):
+    interval_end = _bounded_int(
+        query.get("intervalEnd", ["0"])[0], 0, 0, 1_000_000
+    )
+    if interval_end not in range(1, 25):
         interval_end = 0
     page = _bounded_int(query.get("page", ["1"])[0], 1, 1, 1_000_000)
     snapshot_id = _bounded_int(
@@ -1503,7 +1527,8 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         f'<div class="stat-item"><span>{html.escape(label)}</span>'
         f'<strong>{html.escape(str(value))}</strong></div>'
         for label, value in (
-            ("本轮应采", total), ("本轮已处理", processed),
+            ("总采集数", task["total_samples"]),
+            ("总失败数", task["total_failure_samples"]),
             ("本轮成功", success), ("本轮失败", failure),
             ("成功率", f"{success_rate:.2f}%"),
             ("本轮耗时", duration),
@@ -1558,7 +1583,7 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         <div class="progress-track"><span style="width:{progress_percent:.2f}%"></span></div>
       </div>
       <div class="stats-strip">{statistics}</div>
-      <p class="task-storage-note">近30天累计 {task["total_samples"]} 条样本 · 数据库
+      <p class="task-storage-note">统计范围为服务器最近30天 · 数据库
         {_format_bytes(int(task["database_bytes"]))}</p>
       <details class="expandable coverage-expand">
         <summary class="coverage-summary">
@@ -1627,8 +1652,7 @@ def collector_distribution_fragment(
     )
     return f"""
       <div class="section-heading distribution-heading"><div>
-        <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2>
-        <p class="muted">各时段监测到余额发生变化的房间数量。</p></div>
+        <div class="eyebrow">DAILY DISTRIBUTION</div><h2>变化时段分布</h2></div>
         <div class="date-nav"><button class="secondary" type="button" data-day-step="-1">上一天</button>
           <input id="distribution-date" type="date" value="{html.escape(distribution["day"])}">
           <button class="secondary" type="button" data-day-step="1">下一天</button>
@@ -1656,7 +1680,7 @@ def _distribution_interval_html(
     return f"""
       <button class="interval-card{selected}{abnormal}" type="button"
         data-interval-end="{int(row["end_hour"])}">
-        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]):02d}:00</strong>
+        <strong class="interval-time">{int(row["start_hour"]):02d}:00–{int(row["end_hour"]) % 24:02d}:00</strong>
         <div class="interval-visual"><div class="interval-track"><div class="interval-fill" style="width:{width:.2f}%">
           <span class="consumption-segment" style="width:{consumption_share:.2f}%"></span>
           <span class="recharge-segment" style="width:{recharge_share:.2f}%"></span>
@@ -1887,6 +1911,169 @@ def _format_bytes(value: int) -> str:
     return f"{value / 1024 / 1024:.1f} MiB"
 
 
+def product_page(manifest: dict[str, Any]) -> str:
+    """固定下载入口的公开产品页；只引用站内最新版 APK，不依赖第三方资源。"""
+
+    version = html.escape(str(manifest.get("versionName", "最新版")))
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#201435">
+  <meta name="description" content="江理电小侠（南昌校区）：提前关注宿舍电量，避免游戏或空调因余额不足突然断电。">
+  <title>江理电小侠（南昌校区）</title>
+  <style>
+    :root {{ --bg:#f7f3eb; --surface:#fffdf9; --ink:#211c2c; --muted:#716a76;
+      --brand:#4d3474; --brand-dark:#201435; --soft:#f0eaf6; --line:#e5dee8;
+      --lightning:#ffd84a; --lightning-hover:#ffca24;
+      color-scheme:light; }}
+    * {{ box-sizing:border-box; }}
+    html {{ scroll-behavior:smooth; }}
+    body {{ margin:0; color:var(--ink); background:var(--bg); font-family:-apple-system,
+      BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }}
+    a {{ color:inherit; }}
+    .nav,.hero,.section,.footer {{ width:min(1080px,calc(100% - 40px)); margin:auto; }}
+    .nav {{ height:72px; display:flex; align-items:center; justify-content:space-between; }}
+    .brand {{ display:flex; align-items:center; gap:12px; font-weight:800; }}
+    .logo {{ width:42px; height:42px; display:block; object-fit:cover; padding:2px;
+      background:#180d3f; border:1px solid #6d59a1; border-radius:13px; }}
+    .nav-download,.primary {{ text-decoration:none; border-radius:12px; font-weight:800;
+      transition:transform .18s,background .18s; }}
+    .nav-download {{ color:#fff; background:var(--brand-dark); }}
+    .nav-download {{ padding:11px 18px; }}
+    .primary {{ display:inline-flex; min-height:54px; align-items:center; padding:0 26px;
+      color:var(--brand-dark); background:var(--lightning); }}
+    .nav-download:hover {{ background:var(--brand); transform:translateY(-1px); }}
+    .primary:hover {{ background:var(--lightning-hover); transform:translateY(-1px); }}
+    .hero {{ min-height:590px; display:grid; grid-template-columns:1.05fr .95fr;
+      align-items:center; gap:62px; margin-top:18px; padding:58px 64px; color:#fff;
+      background:var(--brand-dark); border:1px solid #382753; border-radius:32px;
+      box-shadow:0 24px 70px #2417351c; }}
+    .kicker {{ color:var(--lightning); font-weight:800; letter-spacing:.08em; font-size:13px; }}
+    h1 {{ margin:14px 0 18px; font-size:clamp(38px,6vw,64px); line-height:1.08;
+      letter-spacing:-.04em; }}
+    .hero h1 {{ color:#fff; }}
+    .lead {{ margin:0 0 28px; color:#d9d0e3; font-size:19px; line-height:1.8; }}
+    .version {{ margin-left:14px; color:#b9aec7; font-size:13px; }}
+    .trust {{ display:flex; gap:20px; flex-wrap:wrap; margin-top:22px; color:#d1c7dc;
+      font-size:13px; }}
+    .trust span::before {{ content:"✓"; color:var(--lightning); font-weight:900; margin-right:6px; }}
+    .phone-wrap {{ display:grid; place-items:center; position:relative; }}
+    .halo {{ position:absolute; width:380px; height:380px; border-radius:50%;
+      background:#64469a; opacity:.34; filter:blur(8px); }}
+    .phone {{ position:relative; width:min(310px,82vw); padding:14px; border-radius:38px;
+      background:#100b18; border:1px solid #4b3a5b; box-shadow:0 30px 80px #09050f70;
+      transform:rotate(1deg); }}
+    .screen {{ min-height:520px; padding:25px 15px 16px; border-radius:27px;
+      color:var(--ink); background:#f3f0f6; overflow:hidden; }}
+    .screen-head {{ display:flex; justify-content:space-between; align-items:center;
+      margin-bottom:15px; font-size:14px; font-weight:800; }}
+    .mini-card {{ padding:16px; background:#fff; border:1px solid #ebe6ef;
+      border-radius:17px; margin-bottom:12px; }}
+    .room-row {{ display:flex; justify-content:space-between; align-items:center; font-weight:800; }}
+    .pill {{ padding:5px 8px; border-radius:99px; background:#e5f3ec; color:#297153;
+      font-size:10px; }}
+    .balance {{ margin:18px 0 2px; font-size:31px; font-weight:850; letter-spacing:-.04em; }}
+    .amount,.meta {{ color:#81778a; font-size:11px; }}
+    .card-actions {{ display:flex; justify-content:space-between; align-items:center;
+      margin-top:15px; padding-top:12px; border-top:1px solid #eee9f1; }}
+    .mini-button {{ padding:8px 12px; color:#fff; background:var(--brand-dark); border-radius:9px;
+      font-size:11px; font-weight:800; }}
+    .chart-head {{ display:flex; align-items:center; justify-content:space-between; }}
+    .chart-head b {{ font-size:13px; }} .toggle {{ color:var(--brand); font-size:10px; }}
+    .chart {{ width:100%; height:125px; margin-top:12px; }}
+    .chart-grid {{ stroke:#eee9f1; stroke-width:1; }}
+    .chart-line {{ fill:none; stroke:var(--brand); stroke-width:4; stroke-linecap:round;
+      stroke-linejoin:round; }}
+    .chart-fill {{ fill:url(#area); opacity:.7; }}
+    .section {{ padding:88px 0 78px; }}
+    .section h2 {{ margin:0 auto 12px; text-align:center; font-size:34px; }}
+    .section-intro {{ max-width:620px; margin:0 auto 40px; text-align:center; color:var(--muted);
+      line-height:1.8; }}
+    .features {{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }}
+    .feature {{ min-height:190px; padding:25px; background:var(--surface);
+      border:1px solid var(--line); border-radius:20px; }}
+    .feature-icon {{ width:46px; height:46px; display:grid; place-items:center; border-radius:14px;
+      background:#fff1ad; color:var(--brand-dark); font-size:22px; }}
+    .feature h3 {{ margin:21px 0 9px; font-size:18px; }}
+    .feature p {{ margin:0; color:var(--muted); line-height:1.7; font-size:14px; }}
+    .download-card {{ margin-top:72px; padding:42px; display:flex; align-items:center;
+      justify-content:space-between; gap:30px; color:#fff; background:var(--brand-dark);
+      border:1px solid #382753; border-radius:26px; }}
+    .download-card h2 {{ margin:0 0 8px; text-align:left; font-size:30px; }}
+    .download-card p {{ margin:0; color:#ded3e9; }}
+    .download-card .primary {{ flex:none; color:var(--brand-dark);
+      background:var(--lightning); box-shadow:none; }}
+    .footer {{ padding:26px 0 44px; border-top:1px solid var(--line); color:var(--muted);
+      text-align:center; font-size:12px; }}
+    @media(max-width:760px) {{
+      .nav {{ height:64px; }} .nav-download {{ padding:9px 13px; font-size:13px; }}
+      .hero {{ width:calc(100% - 24px); grid-template-columns:1fr; gap:52px;
+        margin-top:8px; padding:42px 22px 52px; text-align:center; border-radius:24px; }}
+      .lead {{ font-size:16px; }} .trust {{ justify-content:center; }}
+      .features {{ grid-template-columns:1fr; }} .feature {{ min-height:0; }}
+      .section {{ padding:60px 0; }} .download-card {{ padding:30px 24px; text-align:center;
+        flex-direction:column; }} .download-card h2 {{ text-align:center; }}
+    }}
+    @media(prefers-reduced-motion:reduce) {{ * {{ scroll-behavior:auto!important; transition:none!important; }} }}
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="主导航">
+    <div class="brand"><img class="logo" src="/assets/mascot-app-icon.png" alt=""><span>江理电小侠</span></div>
+    <a class="nav-download" href="#download">下载应用</a>
+  </nav>
+  <main>
+    <section class="hero">
+      <div>
+        <div class="kicker">南昌校区宿舍用电助手</div>
+        <h1>别等突然停电，<br>才想起查余额。</h1>
+        <p class="lead">游戏正到关键时刻，空调正在对抗炎炎夏日——提前盯住余额，别让突然断电打乱节奏。</p>
+        <a class="primary" href="/downloads/latest.apk">立即下载 Android 版</a><span class="version">{version}</span>
+        <div class="trust"><span>无需注册</span><span>本地配置优先</span><span>服务器离线不影响查询</span></div>
+      </div>
+      <div class="phone-wrap" aria-label="应用界面示意图">
+        <div class="halo"></div>
+        <div class="phone"><div class="screen">
+          <div class="screen-head"><span>我的房间</span><span>设置</span></div>
+          <div class="mini-card">
+            <div class="room-row"><span>第一公寓 · 305</span><span class="pill">余额正常</span></div>
+            <div class="balance">67.85 <small style="font-size:13px">度</small></div>
+            <div class="amount">约 40.71 元</div>
+            <div class="card-actions"><span class="meta">刚刚更新 · 监测中</span><span class="mini-button">电费充值</span></div>
+          </div>
+          <div class="mini-card">
+            <div class="chart-head"><b>余额趋势</b><span class="toggle">度&nbsp;&nbsp; 元</span></div>
+            <svg class="chart" viewBox="0 0 270 125" role="img" aria-label="平滑下降的余额趋势示意">
+              <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#8d73b2" stop-opacity=".35"/><stop offset="1" stop-color="#8d73b2" stop-opacity="0"/></linearGradient></defs>
+              <path class="chart-grid" d="M0 20H270M0 62H270M0 104H270"/>
+              <path class="chart-fill" d="M0 26 C34 27 42 35 72 38 S114 49 138 58 S183 61 203 78 S238 83 270 98 V125H0Z"/>
+              <path class="chart-line" d="M0 26 C34 27 42 35 72 38 S114 49 138 58 S183 61 203 78 S238 83 270 98"/>
+            </svg>
+          </div>
+        </div></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>这些瞬间，真的很扫兴</h2>
+      <p class="section-intro">停电总是来得突然，但余额不足其实可以更早知道。</p>
+      <div class="features">
+        <article class="feature"><div class="feature-icon">⚡</div><h3>团战正关键，宿舍突然断电</h3><p>余额和趋势随手可查，低余额提前提醒，少一次措手不及。</p></article>
+        <article class="feature"><div class="feature-icon">❄</div><h3>炎炎夏日，空调突然停转</h3><p>设置自己的提醒阈值，开启监测后持续复查，不必等到电量归零才发现。</p></article>
+        <article class="feature"><div class="feature-icon">¥</div><h3>想充值，却想不起入口在哪</h3><p>不用再翻公众号和历史消息，首页直接进入校付宝官方充值流程。</p></article>
+      </div>
+      <div class="download-card" id="download">
+        <div><h2>别让余额不足，变成突然停电</h2><p>提前看余额，充值少绕路 · 仅支持江西理工大学南昌校区</p></div>
+        <a class="primary" href="/downloads/latest.apk">立即下载最新版</a>
+      </div>
+    </section>
+  </main>
+  <footer class="footer">zhiSZ · 反馈：3357627169@qq.com</footer>
+</body>
+</html>"""
+
+
 def error_page(title: str, message: str) -> str:
     return page_shell(
         title,
@@ -1902,7 +2089,7 @@ def page_shell(title: str, content: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{html.escape(title)} · 江理电费管家</title>
+  <title>{html.escape(title)} · 江理电小侠</title>
   <style>
     :root {{
       color-scheme: light dark;
@@ -2057,27 +2244,28 @@ def page_shell(title: str, content: str) -> str:
     .is-loading {{ opacity:.48; pointer-events:none; transition:opacity .15s ease; }}
     .empty-state {{ padding:32px 12px; text-align:center; color:var(--muted); }}
     .error-state {{ color:var(--danger); }}
-    .distribution-heading {{ display:grid; grid-template-columns:1fr; align-items:start; gap:10px; margin-bottom:12px; }}
+    .distribution-heading {{ display:grid; grid-template-columns:1fr; align-items:start; gap:8px; margin-bottom:8px; }}
     .date-nav {{ flex-wrap:nowrap; justify-content:flex-start; gap:7px; }}
-    .date-nav input {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);
+    .date-nav button {{ min-height:40px; padding:7px 13px; }}
+    .date-nav input {{ min-height:40px; padding:7px 10px; border:1px solid var(--border);
       border-radius:10px; background:var(--surface); color:var(--text); font:inherit; }}
-    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:8px 20px; padding:10px 12px;
-      border:1px solid var(--border); border-radius:12px; margin-bottom:8px; color:var(--muted); }}
+    .distribution-summary {{ display:flex; flex-wrap:wrap; gap:8px 20px; padding:8px 12px;
+      border:1px solid var(--border); border-radius:12px; margin-bottom:6px; color:var(--muted); }}
     .distribution-summary strong {{ color:var(--text); margin-right:4px; }}
-    .interval-list {{ display:grid; gap:2px; }}
+    .interval-list {{ display:grid; gap:1px; }}
     .interval-card {{ display:grid; grid-template-columns:112px minmax(80px,1fr) 176px; align-items:center;
-      gap:12px; min-height:32px; padding:5px 10px; text-align:left; background:var(--surface); color:var(--text);
+      gap:12px; min-height:36px; padding:7px 10px; text-align:left; background:var(--surface); color:var(--text);
       border:1px solid transparent; border-radius:9px; font-weight:400; }}
     .interval-card:hover,.interval-card.selected {{ border-color:var(--primary); background:var(--soft); }}
     .interval-card.has-abnormal {{ border-color:#d97706; }}
-    .interval-time {{ font-size:12px; }}
-    .interval-track {{ height:7px; background:var(--soft); border-radius:999px; overflow:hidden; }}
+    .interval-time {{ font-size:13px; }}
+    .interval-track {{ height:8px; background:var(--soft); border-radius:999px; overflow:hidden; }}
     .interval-fill {{ display:flex; height:100%; min-width:0; border-radius:inherit; overflow:hidden; }}
     .consumption-segment {{ height:100%; background:var(--primary); }}
     .recharge-segment {{ height:100%; background:#16875b; }}
     .interval-counts {{ display:flex; align-items:center; justify-content:flex-end; gap:9px;
-      color:var(--muted); font-size:11px; white-space:nowrap; }}
-    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:15px; }}
+      color:var(--muted); font-size:12px; white-space:nowrap; }}
+    .interval-counts strong {{ min-width:30px; color:var(--text); text-align:right; font-size:16px; }}
     .back-to-top {{ position:fixed; right:18px; bottom:18px; z-index:5; box-shadow:0 4px 16px #17223b18;
       opacity:0; pointer-events:none; transform:translateY(8px); transition:opacity .18s ease,transform .18s ease; }}
     .back-to-top.visible {{ opacity:1; pointer-events:auto; transform:translateY(0); }}
