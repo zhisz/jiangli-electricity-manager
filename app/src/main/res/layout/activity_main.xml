@@ -1,408 +1,253 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  详情页只保留“余额 → 图表 → 快捷功能”。房间级配置全部进入右上角独立设置页，
-  第一屏优先服务查看与刷新，不再出现长表单和重复状态卡。
+  房间详情采用固定一屏结构，只保留用户最高频的“当前余额”和“余额趋势”。
+  图表卡片使用剩余高度自适应，小屏上不会因为固定图高把页面撑成纵向滚动页。
 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:clipToPadding="false"
-    android:fillViewport="true">
+    android:orientation="vertical"
+    android:paddingStart="@dimen/page_horizontal"
+    android:paddingTop="@dimen/space_2"
+    android:paddingEnd="@dimen/page_horizontal"
+    android:paddingBottom="@dimen/space_3">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:importantForAutofill="noExcludeDescendants"
-        android:orientation="vertical"
-        android:paddingStart="@dimen/page_horizontal"
-        android:paddingTop="@dimen/space_3"
-        android:paddingEnd="@dimen/page_horizontal"
-        android:paddingBottom="32dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <!-- 顶部导航保持克制：返回是文字操作，房间名允许两行以适配长别名和大字体。 -->
+        <Button
+            android:id="@+id/backButton"
+            style="@style/Ui.Button.Text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="‹ 返回" />
+
+        <TextView
+            android:id="@+id/detailTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_2"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="房间详情"
+            android:textColor="@color/text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/roomSettingsButton"
+            style="@style/Ui.Button.Text"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="房间设置"
+            android:text="⚙" />
+    </LinearLayout>
+
+    <!-- 当前余额保留刷新、双状态和充值，其他低频信息全部移出首屏。 -->
+    <LinearLayout
+        android:id="@+id/balanceOverviewCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_2"
+        android:background="@drawable/room_card_background"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/backButton"
-                style="@style/Ui.Button.Text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="‹ 返回" />
-
             <TextView
-                android:id="@+id/detailTitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="@dimen/space_2"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="2"
-                android:text="房间详情"
-                android:textColor="@color/text_primary"
-                android:textSize="24sp"
+                android:text="当前余额"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
                 android:textStyle="bold" />
 
             <Button
-                android:id="@+id/roomSettingsButton"
+                android:id="@+id/queryButton"
                 style="@style/Ui.Button.Text"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:contentDescription="房间设置"
-                android:text="⚙" />
+                android:layout_height="40dp"
+                android:minHeight="40dp"
+                android:text="↻ 刷新" />
         </LinearLayout>
 
-        <!-- 余额总览是第一视觉焦点；刷新缩成卡片内次操作，不再占据整行。 -->
         <LinearLayout
-            android:id="@+id/balanceOverviewCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="当前余额"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <Button
-                    android:id="@+id/queryButton"
-                    style="@style/Ui.Button.Text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minHeight="40dp"
-                    android:text="↻ 刷新" />
-            </LinearLayout>
+            android:layout_marginTop="@dimen/space_1"
+            android:gravity="bottom"
+            android:orientation="horizontal">
 
             <TextView
                 android:id="@+id/balanceSurplusText"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_1"
+                android:layout_weight="1"
                 android:text="--.-- 度"
                 android:textColor="@color/text_primary"
-                android:textSize="36sp"
+                android:textSize="34sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/balanceAmountText"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_1"
-                android:text="折算金额 --.-- 元"
+                android:layout_marginBottom="4dp"
+                android:text="约 --.-- 元"
                 android:textColor="@color/text_secondary"
-                android:textSize="17sp" />
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_2"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
             <TextView
                 android:id="@+id/balanceUpdatedText"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
                 android:text="尚未查询"
                 android:textColor="@color/text_tertiary"
-                android:textSize="13sp" />
+                android:textSize="12sp" />
 
-            <!-- 余额状态与监测状态彼此独立，文字在深浅主题和色觉差异下仍能表达含义。 -->
-            <LinearLayout
-                android:layout_width="match_parent"
+            <TextView
+                android:id="@+id/balanceStateText"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:background="@drawable/status_pill_neutral"
+                android:paddingStart="9dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="4dp"
+                android:text="等待查询"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/balanceStateText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/status_pill_neutral"
-                    android:paddingStart="10dp"
-                    android:paddingTop="5dp"
-                    android:paddingEnd="10dp"
-                    android:paddingBottom="5dp"
-                    android:text="等待首次查询"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/monitorStatePillText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_2"
-                    android:background="@drawable/status_pill_neutral"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:minHeight="32dp"
-                    android:paddingStart="10dp"
-                    android:paddingTop="5dp"
-                    android:paddingEnd="10dp"
-                    android:paddingBottom="5dp"
-                    android:text="未开启"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <!-- 电费充值仍由微信完成付款；这里保持次级按钮权重，不抢过余额主数据。 -->
-            <Button
-                android:id="@+id/openOnlineRechargeButton"
-                style="@style/Ui.Button.Secondary"
-                android:layout_width="match_parent"
+            <TextView
+                android:id="@+id/monitorStatePillText"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:text="@string/online_recharge_button" />
+                android:layout_marginStart="@dimen/space_1"
+                android:background="@drawable/status_pill_neutral"
+                android:clickable="true"
+                android:focusable="true"
+                android:minHeight="32dp"
+                android:paddingStart="9dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="4dp"
+                android:text="未开启"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- 图表相关开关统一使用分段控件，弱化原 RadioButton 的表单感。 -->
+        <Button
+            android:id="@+id/openOnlineRechargeButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="@dimen/space_2"
+            android:text="@string/online_recharge_button" />
+    </LinearLayout>
+
+    <!--
+      趋势图占满余额卡片之后的剩余空间。标题区仅保留名称和“度/元”切换；
+      采样详情由图内点选反馈表达，不再长期摆放说明段落。
+    -->
+    <LinearLayout
+        android:id="@+id/chartCard"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="@dimen/space_2"
+        android:layout_weight="1"
+        android:background="@drawable/room_card_background"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
         <LinearLayout
-            android:id="@+id/chartCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
             <TextView
                 android:id="@+id/trendTitleText"
                 style="@style/Ui.Text.SectionTitle"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="余额趋势 · 近 30 天电量" />
+                android:layout_weight="1"
+                android:text="余额趋势" />
 
             <RadioGroup
-                android:id="@+id/chartModeGroup"
-                android:layout_width="match_parent"
+                android:id="@+id/trendMetricGroup"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
                 android:background="@drawable/segment_container_background"
                 android:orientation="horizontal">
 
                 <RadioButton
-                    android:id="@+id/balanceTrendRadio"
+                    android:id="@+id/electricityTrendRadio"
                     style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
+                    android:layout_width="58dp"
+                    android:layout_height="40dp"
                     android:checked="true"
-                    android:text="余额趋势" />
+                    android:text="度" />
 
                 <RadioButton
-                    android:id="@+id/dailyUsageRadio"
+                    android:id="@+id/amountTrendRadio"
                     style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="每日消耗" />
+                    android:layout_width="58dp"
+                    android:layout_height="40dp"
+                    android:text="元" />
             </RadioGroup>
-
-            <LinearLayout
-                android:id="@+id/balanceTrendContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="visible">
-
-                <RadioGroup
-                    android:id="@+id/trendMetricGroup"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="end"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:background="@drawable/segment_container_background"
-                    android:orientation="horizontal">
-
-                    <RadioButton
-                        android:id="@+id/electricityTrendRadio"
-                        style="@style/Ui.SegmentButton"
-                        android:layout_width="84dp"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="电量" />
-
-                    <RadioButton
-                        android:id="@+id/amountTrendRadio"
-                        style="@style/Ui.SegmentButton"
-                        android:layout_width="84dp"
-                        android:layout_height="wrap_content"
-                        android:text="电费" />
-                </RadioGroup>
-
-                <!--
-                  纵轴固定在屏幕左侧，时间内容独立横向滚动。内容总范围始终为 30 天，
-                  每个屏幕视口约展示 7 天；初次进入自动定位最右侧，向左滑查看更早数据。
-                -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="270dp"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:gravity="top"
-                    android:orientation="horizontal">
-
-                    <com.shangzhili.electricityreminder.BalanceTrendAxisView
-                        android:id="@+id/balanceTrendAxisView"
-                        android:layout_width="48dp"
-                        android:layout_height="260dp" />
-
-                    <HorizontalScrollView
-                        android:id="@+id/balanceTrendScrollView"
-                        android:layout_width="0dp"
-                        android:layout_height="270dp"
-                        android:layout_weight="1"
-                        android:fillViewport="false"
-                        android:scrollbars="horizontal">
-
-                        <com.shangzhili.electricityreminder.ElectricityTrendView
-                            android:id="@+id/trendView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="260dp" />
-                    </HorizontalScrollView>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/trendDetailText"
-                    style="@style/Ui.Text.Body"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_1"
-                    android:background="@drawable/status_background"
-                    android:padding="@dimen/space_3"
-                    android:text="点击曲线查看对应时间的趋势余额"
-                    android:textColor="?attr/uiPrimaryDark"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/dailyUsageContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <RadioGroup
-                    android:id="@+id/dailyUsageRangeGroup"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="end"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:background="@drawable/segment_container_background"
-                    android:orientation="horizontal">
-
-                    <RadioButton
-                        android:id="@+id/dailyUsage30Radio"
-                        style="@style/Ui.SegmentButton"
-                        android:layout_width="84dp"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="30 天" />
-
-                    <RadioButton
-                        android:id="@+id/dailyUsage60Radio"
-                        style="@style/Ui.SegmentButton"
-                        android:layout_width="84dp"
-                        android:layout_height="wrap_content"
-                        android:text="60 天" />
-                </RadioGroup>
-
-                <TextView
-                    android:id="@+id/dailyUsageDetailText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:background="@drawable/status_background"
-                    android:padding="@dimen/space_3"
-                    android:text="点击柱子查看日期、当天用量和金额"
-                    android:textColor="?attr/uiPrimaryDark"
-                    android:textSize="14sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="230dp"
-                    android:layout_marginTop="@dimen/space_2"
-                    android:gravity="top"
-                    android:orientation="horizontal">
-
-                    <com.shangzhili.electricityreminder.DailyUsageAxisView
-                        android:id="@+id/dailyUsageAxisView"
-                        android:layout_width="48dp"
-                        android:layout_height="220dp" />
-
-                    <HorizontalScrollView
-                        android:id="@+id/dailyUsageScrollView"
-                        android:layout_width="0dp"
-                        android:layout_height="230dp"
-                        android:layout_weight="1"
-                        android:fillViewport="false"
-                        android:scrollbars="horizontal">
-
-                        <com.shangzhili.electricityreminder.DailyUsageBarView
-                            android:id="@+id/dailyUsageBarView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="220dp" />
-                    </HorizontalScrollView>
-                </LinearLayout>
-
-                <TextView
-                    style="@style/Ui.Text.Body"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_1"
-                    android:text="左右滑动查看更多日期；灰色短线表示仍待余额源结算或缺少有效采样。"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/historySummaryText"
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_2"
-                android:text="暂无历史数据"
-                android:textSize="13sp" />
         </LinearLayout>
 
-        <!-- 两项历史相关功能并排，权重相同且不与保存主操作竞争。 -->
         <LinearLayout
-            android:id="@+id/quickActionsContainer"
+            android:id="@+id/balanceTrendContainer"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/space_2"
+            android:layout_weight="1"
+            android:gravity="top"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/openUsageStatisticsButton"
-                style="@style/Ui.Button.Secondary"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:maxLines="2"
-                android:text="月度用电统计" />
+            <com.shangzhili.electricityreminder.BalanceTrendAxisView
+                android:id="@+id/balanceTrendAxisView"
+                android:layout_width="48dp"
+                android:layout_height="match_parent" />
 
-            <Button
-                android:id="@+id/openRechargeRecordsButton"
-                style="@style/Ui.Button.Secondary"
+            <HorizontalScrollView
+                android:id="@+id/balanceTrendScrollView"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="@dimen/space_2"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:maxLines="2"
-                android:text="记录充值" />
+                android:fillViewport="false"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <com.shangzhili.electricityreminder.ElectricityTrendView
+                    android:id="@+id/trendView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent" />
+            </HorizontalScrollView>
         </LinearLayout>
-
     </LinearLayout>
-</ScrollView>
+</LinearLayout>

@@ -91,11 +91,17 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertAlmostEqual(-1.5, row[2])
         self.assertEqual("用电消耗", row[3])
 
-        self.store.record_sample(
-            "2026-07-31T10:00:00+08:00",
-            self.room,
-            history.QueryResult(True, 100.0, 60.0),
-        )
+        # queried_at 也固定在同一测试日，避免测试运行日期跨月后“最近一天”筛选只看见
+        # 新增事件、误把此前的消耗事件判断成丢失。
+        with mock.patch(
+            "server.public_history.iso_shanghai",
+            return_value="2026-07-31T10:03:00+08:00",
+        ):
+            self.store.record_sample(
+                "2026-07-31T10:00:00+08:00",
+                self.room,
+                history.QueryResult(True, 100.0, 60.0),
+            )
 
         # 后台展示从当前样本/房间目录补齐可读名称，筛选关联仍然只使用稳定 roomCode。
         overview = self.store.collector_overview(event_sort="time_desc")

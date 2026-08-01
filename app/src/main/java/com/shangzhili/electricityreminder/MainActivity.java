@@ -173,6 +173,11 @@ public final class MainActivity extends Activity {
 
             TextView status = card.findViewById(R.id.roomStatusText);
             applyStatus(status, state, monitoringEnabled);
+            // 快捷按钮是一块独立触控区域：单击直接进入充值金额选择，不需要先打开详情
+            // 再寻找充值入口；卡片其余区域仍保留点击详情和长按实时排序。
+            card.findViewById(R.id.roomRechargeButton).setOnClickListener(view ->
+                    startActivity(RoomDetailActivity.createRechargeIntent(this, roomId))
+            );
             card.setOnClickListener(view ->
                     startActivity(RoomDetailActivity.createIntent(this, roomId))
             );

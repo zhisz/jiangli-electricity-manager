@@ -88,12 +88,31 @@
         android:layout_marginTop="@dimen/space_3"
         android:background="@color/divider" />
 
-    <TextView
-        android:id="@+id/roomMetaText"
-        style="@style/Ui.Text.Body"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/space_2"
-        android:maxLines="2"
-        android:text="监测 09:00 · 提醒阈值 20" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/roomMetaText"
+            style="@style/Ui.Text.Body"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:text="每整点监测 · 阈值 20 度" />
+
+        <!-- 首页快捷充值只负责打开已有的安全充值流程，不在卡片内创建订单。 -->
+        <Button
+            android:id="@+id/roomRechargeButton"
+            style="@style/Ui.Button.Secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="@dimen/space_2"
+            android:minWidth="92dp"
+            android:text="电费充值" />
+    </LinearLayout>
 </LinearLayout>

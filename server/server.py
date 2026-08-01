@@ -503,6 +503,10 @@ class ElecService:
         """允许仍持有旧清单的客户端完成旧版下载，同时只统计当前最新版指标。"""
 
         current_name, current_code, current_path = self.current_download()
+        # latest.apk 是对外分享的稳定入口。它在每次请求时解析更新清单，因此服务器
+        # 清理旧 APK 或发布新版本后，产品页和历史分享链接都不会失效。
+        if requested == "latest.apk":
+            return current_name, current_code, current_path
         if requested == current_name:
             return current_name, current_code, current_path
         old_path = self.settings.download_dir / requested
@@ -608,6 +612,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path.startswith("/downloads/"):
             self._download(path, count=False)
+        elif path in {"/", "/download"}:
+            self._send_bytes(HTTPStatus.OK, b"", "text/html; charset=utf-8")
         elif path == "/healthz":
             self._send_bytes(HTTPStatus.OK, b"", "text/plain; charset=utf-8")
         else:
@@ -617,6 +623,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
+        elif path in {"/", "/download"}:
+            try:
+                self._send_html(
+                    HTTPStatus.OK, product_page(self.service.load_manifest())
+                )
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                # 产品介绍页即使暂时读不到清单也应可访问；按钮仍指向稳定下载入口，
+                # 下载服务恢复后无需重新生成页面或更换分享链接。
+                self._send_html(HTTPStatus.OK, product_page({}))
         elif path == "/api/v1/public-history":
             self._public_history()
         elif path == "/admin":
@@ -857,7 +872,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(
                 "Content-Type", "application/vnd.android.package-archive"
             )
-            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
+            self.send_header(
+                "Cache-Control",
+                "no-store" if requested == "latest.apk"
+                else "public, max-age=31536000, immutable",
+            )
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             # 直连开发端口测试时没有 Nginx 消费 X-Accel-Redirect，主动关闭连接可避免
@@ -1887,6 +1909,161 @@ def _format_bytes(value: int) -> str:
     if value < 1024 * 1024:
         return f"{value / 1024:.1f} KiB"
     return f"{value / 1024 / 1024:.1f} MiB"
+
+
+def product_page(manifest: dict[str, Any]) -> str:
+    """固定下载入口的公开产品页；只引用站内最新版 APK，不依赖第三方资源。"""
+
+    version = html.escape(str(manifest.get("versionName", "最新版")))
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#4e3a78">
+  <meta name="description" content="江理电费管家（南昌校区）：余额查询、低余额提醒与趋势查看。">
+  <title>江理电费管家（南昌校区）</title>
+  <style>
+    :root {{ --bg:#f7f5fa; --surface:#fff; --ink:#211b2d; --muted:#706879;
+      --brand:#5d477f; --brand-dark:#43305f; --soft:#eee9f5; --line:#e7e1eb;
+      color-scheme:light; }}
+    * {{ box-sizing:border-box; }}
+    html {{ scroll-behavior:smooth; }}
+    body {{ margin:0; color:var(--ink); background:var(--bg); font-family:-apple-system,
+      BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }}
+    a {{ color:inherit; }}
+    .nav,.hero,.section,.footer {{ width:min(1080px,calc(100% - 40px)); margin:auto; }}
+    .nav {{ height:72px; display:flex; align-items:center; justify-content:space-between; }}
+    .brand {{ display:flex; align-items:center; gap:12px; font-weight:800; }}
+    .logo {{ width:42px; height:42px; display:grid; place-items:center; color:#fff;
+      background:var(--brand); border-radius:13px; box-shadow:0 8px 22px #5d477f25; }}
+    .logo svg {{ width:24px; }}
+    .nav-download,.primary {{ text-decoration:none; color:#fff; background:var(--brand);
+      border-radius:12px; font-weight:800; transition:transform .18s,background .18s; }}
+    .nav-download {{ padding:11px 18px; }}
+    .primary {{ display:inline-flex; min-height:54px; align-items:center; padding:0 26px;
+      box-shadow:0 12px 30px #5d477f28; }}
+    .nav-download:hover,.primary:hover {{ background:var(--brand-dark); transform:translateY(-1px); }}
+    .hero {{ min-height:590px; display:grid; grid-template-columns:1.05fr .95fr;
+      align-items:center; gap:68px; padding:54px 0 76px; }}
+    .kicker {{ color:var(--brand); font-weight:800; letter-spacing:.08em; font-size:13px; }}
+    h1 {{ margin:14px 0 18px; font-size:clamp(38px,6vw,64px); line-height:1.08;
+      letter-spacing:-.04em; }}
+    .lead {{ margin:0 0 28px; color:var(--muted); font-size:19px; line-height:1.8; }}
+    .version {{ margin-left:14px; color:var(--muted); font-size:13px; }}
+    .trust {{ display:flex; gap:20px; flex-wrap:wrap; margin-top:22px; color:var(--muted);
+      font-size:13px; }}
+    .trust span::before {{ content:"✓"; color:var(--brand); font-weight:900; margin-right:6px; }}
+    .phone-wrap {{ display:grid; place-items:center; position:relative; }}
+    .halo {{ position:absolute; width:380px; height:380px; border-radius:50%;
+      background:#e8e0f1; filter:blur(2px); }}
+    .phone {{ position:relative; width:min(310px,82vw); padding:14px; border-radius:38px;
+      background:#17131d; box-shadow:0 30px 80px #2b203b35; transform:rotate(2deg); }}
+    .screen {{ min-height:520px; padding:25px 15px 16px; border-radius:27px;
+      background:#f3f0f6; overflow:hidden; }}
+    .screen-head {{ display:flex; justify-content:space-between; align-items:center;
+      margin-bottom:15px; font-size:14px; font-weight:800; }}
+    .mini-card {{ padding:16px; background:#fff; border:1px solid #ebe6ef;
+      border-radius:17px; margin-bottom:12px; }}
+    .room-row {{ display:flex; justify-content:space-between; align-items:center; font-weight:800; }}
+    .pill {{ padding:5px 8px; border-radius:99px; background:#e5f3ec; color:#297153;
+      font-size:10px; }}
+    .balance {{ margin:18px 0 2px; font-size:31px; font-weight:850; letter-spacing:-.04em; }}
+    .amount,.meta {{ color:#81778a; font-size:11px; }}
+    .card-actions {{ display:flex; justify-content:space-between; align-items:center;
+      margin-top:15px; padding-top:12px; border-top:1px solid #eee9f1; }}
+    .mini-button {{ padding:8px 12px; color:#fff; background:var(--brand); border-radius:9px;
+      font-size:11px; font-weight:800; }}
+    .chart-head {{ display:flex; align-items:center; justify-content:space-between; }}
+    .chart-head b {{ font-size:13px; }} .toggle {{ color:var(--brand); font-size:10px; }}
+    .chart {{ width:100%; height:125px; margin-top:12px; }}
+    .chart-grid {{ stroke:#eee9f1; stroke-width:1; }}
+    .chart-line {{ fill:none; stroke:var(--brand); stroke-width:4; stroke-linecap:round;
+      stroke-linejoin:round; }}
+    .chart-fill {{ fill:url(#area); opacity:.7; }}
+    .section {{ padding:82px 0; }}
+    .section h2 {{ margin:0 auto 12px; text-align:center; font-size:34px; }}
+    .section-intro {{ max-width:620px; margin:0 auto 40px; text-align:center; color:var(--muted);
+      line-height:1.8; }}
+    .features {{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }}
+    .feature {{ min-height:190px; padding:25px; background:var(--surface); border:1px solid var(--line);
+      border-radius:20px; }}
+    .feature-icon {{ width:46px; height:46px; display:grid; place-items:center; border-radius:14px;
+      background:var(--soft); color:var(--brand); font-size:22px; }}
+    .feature h3 {{ margin:21px 0 9px; font-size:18px; }}
+    .feature p {{ margin:0; color:var(--muted); line-height:1.7; font-size:14px; }}
+    .download-card {{ margin-top:72px; padding:42px; display:flex; align-items:center;
+      justify-content:space-between; gap:30px; color:#fff; background:var(--brand-dark);
+      border-radius:26px; }}
+    .download-card h2 {{ margin:0 0 8px; text-align:left; font-size:30px; }}
+    .download-card p {{ margin:0; color:#ded3e9; }}
+    .download-card .primary {{ flex:none; color:var(--brand-dark); background:#fff; box-shadow:none; }}
+    .footer {{ padding:26px 0 44px; border-top:1px solid var(--line); color:var(--muted);
+      text-align:center; font-size:12px; }}
+    @media(max-width:760px) {{
+      .nav {{ height:64px; }} .nav-download {{ padding:9px 13px; font-size:13px; }}
+      .hero {{ grid-template-columns:1fr; gap:52px; padding:40px 0 64px; text-align:center; }}
+      .lead {{ font-size:16px; }} .trust {{ justify-content:center; }}
+      .features {{ grid-template-columns:1fr; }} .feature {{ min-height:0; }}
+      .section {{ padding:60px 0; }} .download-card {{ padding:30px 24px; text-align:center;
+        flex-direction:column; }} .download-card h2 {{ text-align:center; }}
+    }}
+    @media(prefers-reduced-motion:reduce) {{ * {{ scroll-behavior:auto!important; transition:none!important; }} }}
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="主导航">
+    <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M13.2 2 5.8 13h5L9.9 22l8.3-12h-5.1l.1-8Z" fill="currentColor"/></svg></span><span>江理电费管家</span></div>
+    <a class="nav-download" href="#download">下载应用</a>
+  </nav>
+  <main>
+    <section class="hero">
+      <div>
+        <div class="kicker">江西理工大学 · 南昌校区</div>
+        <h1>宿舍电量，<br>一眼看清。</h1>
+        <p class="lead">查询当前余额、观察电量趋势，并在余额不足时及时收到提醒。</p>
+        <a class="primary" href="/downloads/latest.apk">立即下载 Android 版</a><span class="version">{version}</span>
+        <div class="trust"><span>无需注册</span><span>本地配置优先</span><span>服务器离线不影响查询</span></div>
+      </div>
+      <div class="phone-wrap" aria-label="应用界面示意图">
+        <div class="halo"></div>
+        <div class="phone"><div class="screen">
+          <div class="screen-head"><span>我的房间</span><span>设置</span></div>
+          <div class="mini-card">
+            <div class="room-row"><span>第一公寓 · 305</span><span class="pill">余额正常</span></div>
+            <div class="balance">67.85 <small style="font-size:13px">度</small></div>
+            <div class="amount">约 40.71 元</div>
+            <div class="card-actions"><span class="meta">刚刚更新 · 监测中</span><span class="mini-button">电费充值</span></div>
+          </div>
+          <div class="mini-card">
+            <div class="chart-head"><b>余额趋势</b><span class="toggle">度&nbsp;&nbsp; 元</span></div>
+            <svg class="chart" viewBox="0 0 270 125" role="img" aria-label="平滑下降的余额趋势示意">
+              <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#8d73b2" stop-opacity=".35"/><stop offset="1" stop-color="#8d73b2" stop-opacity="0"/></linearGradient></defs>
+              <path class="chart-grid" d="M0 20H270M0 62H270M0 104H270"/>
+              <path class="chart-fill" d="M0 26 C34 27 42 35 72 38 S114 49 138 58 S183 61 203 78 S238 83 270 98 V125H0Z"/>
+              <path class="chart-line" d="M0 26 C34 27 42 35 72 38 S114 49 138 58 S183 61 203 78 S238 83 270 98"/>
+            </svg>
+          </div>
+        </div></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>少一点操作，多一点安心</h2>
+      <p class="section-intro">围绕校园用电的高频场景设计，不堆功能，也不打扰。</p>
+      <div class="features">
+        <article class="feature"><div class="feature-icon">⌁</div><h3>余额与趋势</h3><p>打开房间即可刷新余额；最近 30 天趋势支持横向查看。</p></article>
+        <article class="feature"><div class="feature-icon">◷</div><h3>整点监测</h3><p>按设定策略自动监测，余额不足后继续复查并发送通知。</p></article>
+        <article class="feature"><div class="feature-icon">¥</div><h3>快捷充值</h3><p>首页一键进入电费充值，付款仍由微信与校付宝官方链路完成。</p></article>
+      </div>
+      <div class="download-card" id="download">
+        <div><h2>开始使用江理电费管家</h2><p>仅支持江西理工大学南昌校区 · Android 8.0 及以上</p></div>
+        <a class="primary" href="/downloads/latest.apk">立即下载最新版</a>
+      </div>
+    </section>
+  </main>
+  <footer class="footer">zhiSZ · 反馈：3357627169@qq.com</footer>
+</body>
+</html>"""
 
 
 def error_page(title: str, message: str) -> str:

@@ -13,17 +13,12 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.text.DateFormat;
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -40,6 +35,7 @@ public final class RoomDetailActivity extends Activity {
     }
 
     private static final String EXTRA_ROOM_ID = "roomId";
+    private static final String EXTRA_OPEN_RECHARGE = "openRecharge";
     private static final int REQUEST_RECHARGE_PAYMENT = 1001;
     /** 校付宝订单记录可能短暂延迟，使用逐步拉长的官方状态查询，最多等待两分钟。 */
     private static final long[] RECHARGE_VERIFY_DELAYS = {
@@ -70,24 +66,14 @@ public final class RoomDetailActivity extends Activity {
     private TextView balanceStateText;
     private TextView monitorStatePillText;
     private TextView trendTitleText;
-    private TextView historySummaryText;
-    private TextView dailyUsageDetailText;
     private ElectricityTrendView trendView;
     private BalanceTrendAxisView balanceTrendAxisView;
-    private DailyUsageBarView dailyUsageBarView;
-    private DailyUsageAxisView dailyUsageAxisView;
     private HorizontalScrollView balanceTrendScrollView;
-    private HorizontalScrollView dailyUsageScrollView;
     private Button queryButton;
-    private Button rechargeRecordsButton;
     private Button onlineRechargeButton;
     private LinearLayout balanceTrendContainer;
-    private LinearLayout dailyUsageContainer;
-    private LinearLayout quickActionsContainer;
-    private List<HistoryPoint> latestHistoryPoints = new ArrayList<>();
     private List<HistoryPoint> latestHourlyReadings = new ArrayList<>();
     private List<RechargeRecord> latestRechargeRecords = new ArrayList<>();
-    private int dailyUsageDays = 30;
     /** 防止快速连点并发申请两个一次性令牌或创建两个充值订单。 */
     private boolean rechargeBusy;
     private boolean rechargeVerificationRunning;
@@ -104,6 +90,11 @@ public final class RoomDetailActivity extends Activity {
     public static Intent createIntent(Context context, String roomId) {
         return new Intent(context, RoomDetailActivity.class)
                 .putExtra(EXTRA_ROOM_ID, roomId);
+    }
+
+    /** 首页快捷充值仍复用详情页已经验证过的订单、微信跳转和到账确认链路。 */
+    public static Intent createRechargeIntent(Context context, String roomId) {
+        return createIntent(context, roomId).putExtra(EXTRA_OPEN_RECHARGE, true);
     }
 
     @Override
@@ -136,19 +127,7 @@ public final class RoomDetailActivity extends Activity {
                 updateBalanceTrendTitle();
             }
         });
-        ((RadioGroup) findViewById(R.id.chartModeGroup))
-                .setOnCheckedChangeListener((group, checkedId) ->
-                        showDailyUsageChart(checkedId == R.id.dailyUsageRadio)
-                );
-        ((RadioGroup) findViewById(R.id.dailyUsageRangeGroup))
-                .setOnCheckedChangeListener((group, checkedId) -> {
-                    dailyUsageDays = checkedId == R.id.dailyUsage60Radio ? 60 : 30;
-                    if (dailyUsageContainer.getVisibility() == View.VISIBLE) {
-                        renderDailyUsageChart();
-                    }
-                });
-        dailyUsageBarView.setOnBarSelectedListener(this::showDailyUsageDetail);
-        trendView.setOnTrendPointSelectedListener(this::showTrendDetail);
+        // 页面不再摆放柱状图和大段点选说明；趋势线自身承担主要视觉表达。
         populate(repository.load(roomId));
         refreshStatus();
         refreshHistory();
@@ -163,18 +142,16 @@ public final class RoomDetailActivity extends Activity {
         findViewById(R.id.roomSettingsButton).setOnClickListener(view -> openRoomSettings());
         monitorStatePillText.setOnClickListener(view -> openRoomSettings());
         queryButton.setOnClickListener(view -> queryNow(false));
-        findViewById(R.id.openUsageStatisticsButton).setOnClickListener(view ->
-                startActivity(UsageStatisticsActivity.createIntent(this, roomId))
-        );
-        rechargeRecordsButton.setOnClickListener(view ->
-                startActivity(RechargeRecordsActivity.createIntent(this, roomId))
-        );
         onlineRechargeButton.setOnClickListener(view -> startOnlineRecharge());
 
         // 已保存房间进入详情后自动刷新一次；新增房间尚无有效 roomCode，不自动请求。
         if (savedRoom && repository.isConfigured(roomId)) {
             automaticQueryStarted = true;
             queryNow(true);
+        }
+        if (getIntent().getBooleanExtra(EXTRA_OPEN_RECHARGE, false)) {
+            // 等首帧完成后再展示金额窗口，避免首页切入时出现窗口依附失败或画面闪烁。
+            onlineRechargeButton.post(this::startOnlineRecharge);
         }
     }
 
@@ -234,26 +211,16 @@ public final class RoomDetailActivity extends Activity {
         balanceStateText = findViewById(R.id.balanceStateText);
         monitorStatePillText = findViewById(R.id.monitorStatePillText);
         trendTitleText = findViewById(R.id.trendTitleText);
-        historySummaryText = findViewById(R.id.historySummaryText);
-        dailyUsageDetailText = findViewById(R.id.dailyUsageDetailText);
         trendView = findViewById(R.id.trendView);
         balanceTrendAxisView = findViewById(R.id.balanceTrendAxisView);
-        dailyUsageBarView = findViewById(R.id.dailyUsageBarView);
-        dailyUsageAxisView = findViewById(R.id.dailyUsageAxisView);
         balanceTrendScrollView = findViewById(R.id.balanceTrendScrollView);
-        dailyUsageScrollView = findViewById(R.id.dailyUsageScrollView);
         balanceTrendContainer = findViewById(R.id.balanceTrendContainer);
-        dailyUsageContainer = findViewById(R.id.dailyUsageContainer);
         queryButton = findViewById(R.id.queryButton);
-        rechargeRecordsButton = findViewById(R.id.openRechargeRecordsButton);
         onlineRechargeButton = findViewById(R.id.openOnlineRechargeButton);
-        quickActionsContainer = findViewById(R.id.quickActionsContainer);
     }
 
     private void populate(AppConfig config) {
         detailTitle.setText(config.alias);
-        quickActionsContainer.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
-        rechargeRecordsButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
         onlineRechargeButton.setVisibility(savedRoom ? View.VISIBLE : View.GONE);
     }
 
@@ -1158,44 +1125,11 @@ public final class RoomDetailActivity extends Activity {
     }
 
     private void refreshHistory() {
-        // 多读两天用于计算 60 天柱状图第一根柱子的“前一天 → 当天”消耗。
-        latestHistoryPoints = historyStore.loadDailyPoints(roomId, 62);
+        // 详情页只消费小时采样和充值校正数据；日统计仍保留在本地数据库中，移除入口
+        // 不等于删除用户历史，未来恢复统计功能时无需迁移或重新积累。
         latestRechargeRecords = historyStore.loadRecharges(roomId);
         latestHourlyReadings = historyStore.loadHourlyPoints(roomId, 30 * 24);
         refreshBalanceTrend();
-        if (dailyUsageContainer.getVisibility() == View.VISIBLE) renderDailyUsageChart();
-        List<HistoryPoint> trendPoints = tail(latestHistoryPoints, 60);
-        if (trendPoints.size() < 2) {
-            historySummaryText.setText(String.format(
-                    Locale.CHINA,
-                    "已记录 %d 个采样日、%d 个近期小时点；整点监测运行后可查看时段速率。",
-                    trendPoints.size(), latestHourlyReadings.size()
-            ));
-            return;
-        }
-
-        ZoneId zoneId = ZoneId.systemDefault();
-        LocalDate endExclusive = LocalDate.now(zoneId).plusDays(1);
-        LocalDate startInclusive = endExclusive.minusDays(60);
-        UsagePeriodStats stats = UsageStatisticsCalculator.calculate(
-                latestHistoryPoints, latestRechargeRecords,
-                startInclusive, endExclusive, zoneId
-        );
-        double recordedRechargeAmount = 0;
-        for (RechargeRecord recharge : latestRechargeRecords) {
-            if (!recharge.date.isBefore(startInclusive)
-                    && recharge.date.isBefore(endExclusive)) {
-                recordedRechargeAmount += recharge.amount;
-            }
-        }
-        historySummaryText.setText(String.format(
-                Locale.CHINA,
-                "近 60 天（%d 个采样日）估算用电 %.2f 度 · 约 %.2f 元\n"
-                        + "已登记充值 %.2f 元 · 未匹配上涨区间 %d 段\n"
-                        + "余额源延迟刷新时按确认窗口均摊；尾部相同余额显示为待结算。",
-                trendPoints.size(), stats.usageKwh, stats.costAmount,
-                recordedRechargeAmount, stats.excludedRechargeIntervals
-        ));
     }
 
     /**
@@ -1250,113 +1184,8 @@ public final class RoomDetailActivity extends Activity {
         );
     }
 
-    private void showDailyUsageChart(boolean showDaily) {
-        LinearLayout showing = showDaily ? dailyUsageContainer : balanceTrendContainer;
-        LinearLayout hiding = showDaily ? balanceTrendContainer : dailyUsageContainer;
-        hiding.animate().cancel();
-        hiding.setVisibility(View.GONE);
-        showing.setAlpha(0f);
-        showing.setVisibility(View.VISIBLE);
-        // 仅使用短暂淡入，不改变尺寸或阻碍操作；避免分段切换时产生生硬闪烁。
-        showing.animate().alpha(1f).setDuration(160L).start();
-        if (showDaily) {
-            renderDailyUsageChart();
-        } else {
-            updateBalanceTrendTitle();
-            // 余额趋势默认处于隐藏状态，初次加载时容器还没有可滚动宽度；必须在用户
-            // 真正切换到该图表、完成布局后再次定位最右侧，保证第一眼看到最新余额。
-            balanceTrendScrollView.post(
-                    () -> balanceTrendScrollView.fullScroll(View.FOCUS_RIGHT)
-            );
-        }
-    }
-
     private void updateBalanceTrendTitle() {
-        boolean showAmount = ((RadioButton) findViewById(R.id.amountTrendRadio)).isChecked();
-        trendTitleText.setText(showAmount
-                ? "余额趋势 · 近 30 天电费"
-                : "余额趋势 · 近 30 天电量");
-    }
-
-    /** 详情以用户当前看到的趋势值为主，底层平台采样仅用于算法校正，不增加阅读负担。 */
-    private void showTrendDetail(BalanceTrendPoint point) {
-        TextView detail = findViewById(R.id.trendDetailText);
-        ZoneId zoneId = ZoneId.systemDefault();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
-                "yyyy年M月d日 HH:mm", Locale.CHINA
-        );
-        String sampledAt = formatter.format(
-                Instant.ofEpochMilli(point.reading.timestamp).atZone(zoneId)
-        );
-        String suffix;
-        if (point.unmatchedIncrease) {
-            suffix = "\n该时段变化较大，趋势将在后续数据更新后继续校正";
-        } else if (point.awaitingSourceUpdate && point.rateValid) {
-            suffix = String.format(
-                    Locale.CHINA,
-                    "\n预测波动范围 %.2f～%.2f 度 · 等待平台更新",
-                    point.confidenceLowSurplus,
-                    point.confidenceHighSurplus
-            );
-        } else if (point.awaitingSourceUpdate) {
-            suffix = "\n历史数据仍在积累，后续趋势会逐步完善";
-        } else if (point.estimated) {
-            suffix = "\n已根据近期相同时段的用电规律平滑处理";
-        } else {
-            suffix = "";
-        }
-        detail.setText(String.format(
-                Locale.CHINA,
-                "%s · 趋势余额 %.2f 度 · 约 %.2f 元%s",
-                sampledAt, point.displayedSurplus, point.displayedAmount, suffix
-        ));
-    }
-
-    /**
-     * 每根柱子表示“前一个采样日到该日期”的消费。复用月度统计计算器，因此充值修正、
-     * 跨日分摊和未匹配上涨排除规则在折线页与月度页完全一致。
-     */
-    private void renderDailyUsageChart() {
-        if (dailyUsageBarView == null) return;
-        ZoneId zoneId = ZoneId.systemDefault();
-        LocalDate today = LocalDate.now(zoneId);
-        LocalDate firstDate = today.minusDays(dailyUsageDays - 1L);
-        List<DailyUsagePoint> bars = new ArrayList<>();
-        for (int offset = 0; offset < dailyUsageDays; offset++) {
-            LocalDate date = firstDate.plusDays(offset);
-            UsagePeriodStats stats = UsageStatisticsCalculator.calculate(
-                    latestHistoryPoints, latestRechargeRecords,
-                    date.minusDays(1), date, zoneId
-            );
-            bars.add(new DailyUsagePoint(
-                    date, stats.usageKwh, stats.costAmount, stats.hasData()
-            ));
-        }
-        dailyUsageBarView.setPoints(bars);
-        // 固定纵轴和可滚动柱子必须使用同一批数据，才能保证三个刻度与柱高一一对应。
-        dailyUsageAxisView.setPoints(bars);
-        trendTitleText.setText("每日消耗 · " + dailyUsageDays + " 天");
-        dailyUsageDetailText.setText("点击柱子查看日期、当天用量和金额");
-        // 初次打开和切换范围时定位到最右侧，让用户先看到最近日期。
-        dailyUsageScrollView.post(() ->
-                dailyUsageScrollView.fullScroll(View.FOCUS_RIGHT)
-        );
-    }
-
-    private void showDailyUsageDetail(DailyUsagePoint point) {
-        String date = DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.CHINA)
-                .format(point.date);
-        dailyUsageDetailText.setText(point.hasData
-                ? String.format(
-                        Locale.CHINA, "%s：当天估算用电 %.2f 度 · 约 %.2f 元",
-                        date, point.usageKwh, point.costAmount
-                )
-                : date + "：尚无已确认消耗，可能仍在等待余额源更新，或存在未登记上涨");
-    }
-
-    private List<HistoryPoint> tail(List<HistoryPoint> points, int maximumSize) {
-        int start = Math.max(0, points.size() - maximumSize);
-        return new ArrayList<>(points.subList(start, points.size()));
+        trendTitleText.setText("余额趋势");
     }
 
     /** 余额拆分到三个文本层级，主数据不会再与更新时间挤在同一段文字中。 */
@@ -1365,7 +1194,7 @@ public final class RoomDetailActivity extends Activity {
                 DateFormat.MEDIUM, DateFormat.SHORT, Locale.CHINA
         );
         balanceSurplusText.setText(String.format(Locale.CHINA, "%.2f 度", reading.surplus));
-        balanceAmountText.setText(String.format(Locale.CHINA, "折算金额 %.2f 元", reading.amount));
+        balanceAmountText.setText(String.format(Locale.CHINA, "约 %.2f 元", reading.amount));
         balanceUpdatedText.setText("更新于 " + format.format(new Date(reading.timestamp)));
         balanceUpdatedText.setTextColor(getColor(R.color.text_tertiary));
     }

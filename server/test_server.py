@@ -229,6 +229,20 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(0, version_code)
         self.assertEqual(old_apk, path)
 
+    def test_stable_latest_download_always_resolves_current_manifest(self):
+        service = app_server.ElecService(self.settings)
+        filename, version_code, path = service.available_download("latest.apk")
+        self.assertEqual("electricity-reminder-0.15.0.apk", filename)
+        self.assertEqual(22, version_code)
+        self.assertTrue(path.is_file())
+
+    def test_product_page_uses_stable_download_link(self):
+        page = app_server.product_page({"versionName": "1.3.0"})
+        self.assertIn("江理电费管家", page)
+        self.assertIn("/downloads/latest.apk", page)
+        self.assertNotIn("electricity-reminder-1.3.0.apk", page)
+        self.assertIn("1.3.0", page)
+
     def test_signed_session_rejects_tampering_and_expiry(self):
         service = app_server.ElecService(self.settings)
         token = service.create_session()
