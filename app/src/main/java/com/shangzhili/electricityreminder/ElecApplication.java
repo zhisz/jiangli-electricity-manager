@@ -53,6 +53,7 @@ public final class ElecApplication extends Application
         // 持久化低频版本检查，普通划掉后台后仍可由系统在合适时机发送新版本通知。
         UpdateNotificationWorker.schedulePeriodic(this);
         AnnouncementWorker.schedule(this);
+        RemoteMessageScheduler.ensureScheduled(this);
     }
 
     @Override

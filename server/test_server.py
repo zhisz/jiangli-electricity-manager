@@ -189,7 +189,7 @@ class AnalyticsStoreTests(unittest.TestCase):
 
         first = self.store.deliver_announcements(first_device, 0)
         self.store.deliver_announcements(first_device, 0)
-        self.assertEqual(announcement_id, first[0]["id"])
+        self.assertEqual(announcement_id, first["announcements"][0]["id"])
         self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
         self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
 
@@ -198,13 +198,40 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(1, item["delivered_count"])
         self.assertEqual(1, item["read_count"])
 
-    def test_announcement_after_id_and_unknown_read(self):
+    def test_announcement_delivery_uses_server_receipt_not_client_cursor(self):
         device = "c" * 64
         first_id = self.store.create_announcement("第一条", "内容一")
         second_id = self.store.create_announcement("第二条", "内容二")
         items = self.store.deliver_announcements(device, first_id)
-        self.assertEqual([second_id], [item["id"] for item in items])
+        self.assertEqual(
+            [first_id, second_id],
+            [item["id"] for item in items["announcements"]],
+        )
         self.assertFalse(self.store.mark_announcement_read(999_999, device))
+
+    def test_close_reopen_and_withdraw_have_distinct_behavior(self):
+        device = "d" * 64
+        announcement_id = self.store.create_announcement("测试公告", "状态测试")
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "close"))
+        closed = self.store.deliver_announcements(device, 0)
+        self.assertEqual([], closed["announcements"])
+
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "reopen"))
+        opened = self.store.deliver_announcements(device, 0)
+        self.assertEqual(announcement_id, opened["announcements"][0]["id"])
+
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "withdraw"))
+        withdrawn = self.store.deliver_announcements(device, 0)
+        self.assertEqual([announcement_id], withdrawn["withdrawn_ids"])
+        self.assertFalse(self.store.mark_announcement_read(announcement_id, device))
+
+    def test_withdrawn_announcement_is_irreversible(self):
+        announcement_id = self.store.create_announcement("撤回", "不能恢复")
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "withdraw"))
+        self.assertFalse(self.store.change_announcement_state(announcement_id, "reopen"))
+        item = self.store.list_announcements()[0]
+        self.assertEqual(1, item["withdrawn"])
+        self.assertEqual(0, item["active"])
 
     def test_announcement_admin_page_escapes_user_visible_content(self):
         announcement_id = self.store.create_announcement("<标题>", "正文 <script>")

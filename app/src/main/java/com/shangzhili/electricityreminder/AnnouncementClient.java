@@ -19,15 +19,24 @@ final class AnnouncementClient {
     private static final int CONNECT_TIMEOUT_MILLIS = 2_500;
     private static final int READ_TIMEOUT_MILLIS = 4_000;
 
-    List<Announcement> sync(String baseUrl, String installId, long afterId) throws IOException {
+    static final class SyncResult {
+        final List<Announcement> announcements;
+        final List<Long> withdrawnIds;
+
+        SyncResult(List<Announcement> announcements, List<Long> withdrawnIds) {
+            this.announcements = announcements;
+            this.withdrawnIds = withdrawnIds;
+        }
+    }
+
+    SyncResult sync(String baseUrl, String installId, long afterId) throws IOException {
         JSONObject request = new JSONObject();
         try {
             request.put("installId", installId).put("afterId", afterId);
             JSONObject response = request(baseUrl, "/api/v1/announcements/sync", request, false);
             JSONArray rows = response.optJSONArray("announcements");
             List<Announcement> result = new ArrayList<>();
-            if (rows == null) return result;
-            for (int index = 0; index < rows.length(); index++) {
+            if (rows != null) for (int index = 0; index < rows.length(); index++) {
                 JSONObject row = rows.optJSONObject(index);
                 if (row == null) continue;
                 long id = row.optLong("id", 0);
@@ -39,7 +48,13 @@ final class AnnouncementClient {
                     ));
                 }
             }
-            return result;
+            JSONArray withdrawn = response.optJSONArray("withdrawnIds");
+            List<Long> withdrawnIds = new ArrayList<>();
+            if (withdrawn != null) for (int index = 0; index < withdrawn.length(); index++) {
+                long id = withdrawn.optLong(index, 0);
+                if (id > 0) withdrawnIds.add(id);
+            }
+            return new SyncResult(result, withdrawnIds);
         } catch (org.json.JSONException exception) {
             throw new IOException("公告响应格式无效", exception);
         }

@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 52,
-  "versionName": "2.1.1",
-  "minSupportedVersionCode": 52,
+  "versionCode": 53,
+  "versionName": "2.2.0",
+  "minSupportedVersionCode": 53,
   "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.1.1.apk",
+  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.2.0.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "修复公告弹窗出现后界面被切换为浅色、且设置页无法重新切回深色的问题。统一 Activity 与 Material 弹窗的夜间模式状态，并修复主题按钮选择事件。"
+  "releaseNotes": "新增15分钟后台远程消息检查，更新始终优先于公告；公告支持关闭、重新开启和撤回，撤回后客户端会清除待读内容与通知。"
 }

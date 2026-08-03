@@ -78,6 +78,11 @@
             android:name=".RepeatAlarmReceiver"
             android:exported="false" />
 
+        <!-- 15 分钟滚动闹钟只唤醒短 Worker；普通划掉后台后仍可收到更新和公告。 -->
+        <receiver
+            android:name=".RemoteMessageReceiver"
+            android:exported="false" />
+
         <!-- 系统时间环境变化后重新计算下一整点。 -->
         <receiver
             android:name=".RescheduleReceiver"

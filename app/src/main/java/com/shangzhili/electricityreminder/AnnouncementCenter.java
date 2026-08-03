@@ -79,12 +79,12 @@ public final class AnnouncementCenter {
                 retryPendingReads(context, baseUrl);
                 SharedPreferences preferences = preferences(context);
                 long afterId = preferences.getLong(KEY_LAST_RECEIVED_ID, 0);
-                List<Announcement> rows = new AnnouncementClient().sync(
+                AnnouncementClient.SyncResult result = new AnnouncementClient().sync(
                         baseUrl, UsageReporter.deviceIdentity(context), afterId
                 );
                 Map<Long, Announcement> unread = readUnread(preferences);
                 long newest = afterId;
-                for (Announcement row : rows) {
+                for (Announcement row : result.announcements) {
                     unread.put(row.id, row);
                     newest = Math.max(newest, row.id);
                 }
@@ -92,17 +92,24 @@ public final class AnnouncementCenter {
                         KEY_NOTIFIED, Collections.emptySet()
                 );
                 Set<String> notifiedCopy = new java.util.HashSet<>(notified);
+                NotificationHelper notificationHelper = new NotificationHelper(context);
+                for (Long withdrawnId : result.withdrawnIds) {
+                    unread.remove(withdrawnId);
+                    notifiedCopy.remove(Long.toString(withdrawnId));
+                    notificationHelper.cancelAnnouncement(withdrawnId);
+                }
                 if (notify) {
-                    NotificationHelper helper = new NotificationHelper(context);
                     for (Announcement row : unread.values()) {
                         String id = Long.toString(row.id);
-                        if (!notifiedCopy.contains(id) && helper.announcement(row)) {
+                        if (!notifiedCopy.contains(id)
+                                && notificationHelper.announcement(row)) {
                             // 没有通知权限时不提前标记；用户以后授权后，后台任务仍可补发。
                             notifiedCopy.add(id);
                         }
                     }
                 }
-                if (!rows.isEmpty() || !notifiedCopy.equals(notified)) {
+                if (!result.announcements.isEmpty() || !result.withdrawnIds.isEmpty()
+                        || !notifiedCopy.equals(notified)) {
                     // 待读队列与游标放在同一次事务式 Editor 提交，避免只推进游标却丢内容。
                     preferences.edit()
                             .putString(KEY_UNREAD, encodeUnread(unread))

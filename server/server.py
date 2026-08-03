@@ -270,6 +270,25 @@ class AnalyticsStore:
                     ON announcement_delivery(announcement_id, read_at);
                 """
             )
+            # 2.2.0 公告状态迁移：SQLite 的 ADD COLUMN 可在原数据上原地完成，旧公告
+            # 默认保持“推送中”。迁移按列名判断，重复启动服务不会再次执行。
+            announcement_columns = {
+                row["name"] for row in connection.execute(
+                    "PRAGMA table_info(announcements)"
+                ).fetchall()
+            }
+            if "withdrawn" not in announcement_columns:
+                connection.execute(
+                    "ALTER TABLE announcements ADD COLUMN withdrawn INTEGER NOT NULL DEFAULT 0"
+                )
+            if "closed_at" not in announcement_columns:
+                connection.execute(
+                    "ALTER TABLE announcements ADD COLUMN closed_at TEXT"
+                )
+            if "withdrawn_at" not in announcement_columns:
+                connection.execute(
+                    "ALTER TABLE announcements ADD COLUMN withdrawn_at TEXT"
+                )
 
     def record_feedback(self, signature: str, content: str, app_version: str) -> int:
         """反馈与匿名统计共用轻量数据库，但不接收设备、房间或提醒配置。"""
@@ -309,7 +328,7 @@ class AnalyticsStore:
             rows = connection.execute(
                 """
                 SELECT a.id, a.title, a.content, a.published_at, a.target_count,
-                       a.active,
+                       a.active, a.withdrawn, a.closed_at, a.withdrawn_at,
                        COUNT(d.install_hash) AS delivered_count,
                        COUNT(d.read_at) AS read_count
                 FROM announcements a
@@ -324,8 +343,8 @@ class AnalyticsStore:
 
     def deliver_announcements(
         self, install_id: str, after_id: int, limit: int = 20
-    ) -> list[dict[str, Any]]:
-        """按匿名设备幂等记录投递；重复前台检查不会增加“已送达”人数。"""
+    ) -> dict[str, Any]:
+        """返回该设备尚未送达的有效公告，以及已送达但后来被撤回的公告 ID。"""
         install_hash = hash_identity(
             self.telemetry_key, "announcement", install_id.lower()
         )
@@ -333,12 +352,15 @@ class AnalyticsStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, title, content, published_at
-                FROM announcements
-                WHERE active = 1 AND id > ?
-                ORDER BY id ASC LIMIT ?
+                SELECT a.id, a.title, a.content, a.published_at
+                FROM announcements a
+                LEFT JOIN announcement_delivery d
+                  ON d.announcement_id = a.id AND d.install_hash = ?
+                WHERE a.active = 1 AND a.withdrawn = 0
+                  AND d.install_hash IS NULL
+                ORDER BY a.id ASC LIMIT ?
                 """,
-                (max(0, after_id), max(1, min(limit, 50))),
+                (install_hash, max(1, min(limit, 50))),
             ).fetchall()
             connection.executemany(
                 """
@@ -349,7 +371,19 @@ class AnalyticsStore:
                 """,
                 ((int(row["id"]), install_hash, now) for row in rows),
             )
-        return [dict(row) for row in rows]
+            withdrawn_rows = connection.execute(
+                """
+                SELECT a.id FROM announcements a
+                JOIN announcement_delivery d ON d.announcement_id = a.id
+                WHERE d.install_hash = ? AND a.withdrawn = 1
+                ORDER BY a.id
+                """,
+                (install_hash,),
+            ).fetchall()
+        return {
+            "announcements": [dict(row) for row in rows],
+            "withdrawn_ids": [int(row["id"]) for row in withdrawn_rows],
+        }
 
     def mark_announcement_read(self, announcement_id: int, install_id: str) -> bool:
         """“我知道了”回执幂等写入；若客户端漏过投递请求，也先补齐投递记录。"""
@@ -359,7 +393,7 @@ class AnalyticsStore:
         now = iso_utc_now()
         with self._connect() as connection:
             exists = connection.execute(
-                "SELECT 1 FROM announcements WHERE id = ? AND active = 1",
+                "SELECT 1 FROM announcements WHERE id = ? AND withdrawn = 0",
                 (announcement_id,),
             ).fetchone()
             if exists is None:
@@ -375,6 +409,31 @@ class AnalyticsStore:
                 (announcement_id, install_hash, now, now),
             )
         return True
+
+    def change_announcement_state(self, announcement_id: int, action: str) -> bool:
+        """关闭可重新开启；撤回不可逆，并会在客户端下次同步时删除待读内容。"""
+        now = iso_utc_now()
+        statements = {
+            "close": (
+                "UPDATE announcements SET active = 0, closed_at = ? "
+                "WHERE id = ? AND withdrawn = 0", (now, announcement_id),
+            ),
+            "reopen": (
+                "UPDATE announcements SET active = 1, closed_at = NULL "
+                "WHERE id = ? AND withdrawn = 0", (announcement_id,),
+            ),
+            "withdraw": (
+                "UPDATE announcements SET active = 0, withdrawn = 1, "
+                "closed_at = COALESCE(closed_at, ?), withdrawn_at = ? WHERE id = ?",
+                (now, now, announcement_id),
+            ),
+        }
+        if action not in statements:
+            return False
+        sql, parameters = statements[action]
+        with self._connect() as connection:
+            cursor = connection.execute(sql, parameters)
+            return cursor.rowcount > 0
 
     def record_heartbeat(
         self,
@@ -940,6 +999,8 @@ class Handler(BaseHTTPRequestHandler):
             self._change_password()
         elif path == "/admin/announcements":
             self._publish_announcement()
+        elif path == "/admin/announcements/action":
+            self._change_announcement_state()
         else:
             self._send_bytes(
                 HTTPStatus.NOT_FOUND, b"not found\n", "text/plain; charset=utf-8"
@@ -1004,9 +1065,10 @@ class Handler(BaseHTTPRequestHandler):
             after_id = int(payload.get("afterId", 0))
             if not IDENTITY_PATTERN.fullmatch(install_id) or after_id < 0:
                 raise ValueError("invalid announcement sync")
-            items = self.service.store.deliver_announcements(install_id, after_id)
+            result = self.service.store.deliver_announcements(install_id, after_id)
             self._send_json(HTTPStatus.OK, {
-                "announcements": items,
+                "announcements": result["announcements"],
+                "withdrawnIds": result["withdrawn_ids"],
                 "serverTime": iso_utc_now(),
             })
         except (ValueError, TypeError, json.JSONDecodeError):
@@ -1060,6 +1122,31 @@ class Handler(BaseHTTPRequestHandler):
                     error="标题需为 1–80 字，内容需为 1–4000 字。",
                 ),
             )
+
+    def _change_announcement_state(self) -> None:
+        """公告关闭、重新开启和撤回共用一个严格白名单入口。"""
+        session = self._session_token()
+        if not session:
+            self._redirect("/admin/login")
+            return
+        try:
+            form = urllib.parse.parse_qs(
+                self._read_body().decode("utf-8"), keep_blank_values=True
+            )
+            csrf = form.get("csrf", [""])[0]
+            announcement_id = int(form.get("announcementId", ["0"])[0])
+            action = form.get("action", [""])[0]
+            if not hmac.compare_digest(csrf, self.service.csrf_token(session)):
+                self._send_bytes(HTTPStatus.FORBIDDEN, b"forbidden\n", "text/plain")
+                return
+            if announcement_id <= 0 or action not in {"close", "reopen", "withdraw"}:
+                raise ValueError("invalid announcement action")
+            if not self.service.store.change_announcement_state(announcement_id, action):
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "announcement not found"})
+                return
+            self._redirect("/admin/announcements")
+        except (ValueError, UnicodeError, sqlite3.Error):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
 
     def _public_history(self) -> None:
         """公共只读接口：仅按精确 roomCode 返回最近 30 天采样，不需要或暴露凭据。"""
@@ -1667,18 +1754,34 @@ def announcements_page(
         delivered = int(item.get("delivered_count", 0))
         read = int(item.get("read_count", 0))
         rate = (read / delivered * 100) if delivered else 0.0
+        withdrawn = bool(item.get("withdrawn", 0))
+        active = bool(item.get("active", 0)) and not withdrawn
+        state_label = "已撤回" if withdrawn else "推送中" if active else "已关闭"
+        if withdrawn:
+            actions = ""
+        else:
+            toggle_action = "close" if active else "reopen"
+            toggle_label = "关闭推送" if active else "重新开启"
+            actions = f"""
+              <form class="inline-actions" method="post" action="/admin/announcements/action">
+                <input type="hidden" name="csrf" value="{html.escape(csrf)}">
+                <input type="hidden" name="announcementId" value="{int(item.get('id', 0))}">
+                <button class="secondary compact-button" name="action" value="{toggle_action}" type="submit">{toggle_label}</button>
+                <button class="danger-button compact-button" name="action" value="withdraw" type="submit">撤回公告</button>
+              </form>
+            """
         cards.append(
             '<article class="panel feedback-item">'
             '<div class="panel-title"><div>'
             f'<span class="eyebrow">公告 #{int(item.get("id", 0))} · {html.escape(published)}</span>'
             f'<h2>{html.escape(str(item.get("title", "")))}</h2></div>'
-            f'<span class="pill">已读率 {rate:.1f}%</span></div>'
+            f'<div><span class="pill">{state_label}</span> <span class="pill">已读率 {rate:.1f}%</span></div></div>'
             f'<p>{html.escape(str(item.get("content", ""))).replace(chr(10), "<br>")}</p>'
             '<div class="metric-grid compact-metrics">'
             f'{_metric("发布时目标用户", target, "当时已实际打开 App 的设备")}'
             f'{_metric("已送达", delivered, "已从服务器取得该公告")}'
             f'{_metric("已读", read, "明确点击“我知道了”")}'
-            '</div></article>'
+            f'</div>{actions}</article>'
         )
     history = "".join(cards) or '<section class="panel empty-state">尚未发布公告</section>'
     error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
@@ -2531,6 +2634,9 @@ def page_shell(title: str, content: str) -> str:
     main form > textarea {{ resize:vertical; line-height:1.65; }}
     main form > button {{ margin-top:16px; }}
     .compact-metrics {{ grid-template-columns:repeat(3,1fr); margin-top:18px; }}
+    .inline-actions {{ display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }}
+    .inline-actions button {{ margin-top:0; }}
+    .danger-button {{ background:transparent; color:var(--danger); border-color:var(--danger); }}
     .filters {{ display:flex; align-items:end; gap:10px; flex-wrap:wrap; }}
     .filters label {{ display:grid; gap:6px; color:var(--muted); font-size:12px; }}
     .filters input,.filters select {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);

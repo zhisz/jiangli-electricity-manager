@@ -14,7 +14,8 @@ import java.util.Locale;
 public final class NotificationHelper {
     /** MainActivity 用这个 ID 直接打开本渠道的系统设置页。 */
     public static final String ALERT_CHANNEL = "electricity_alerts";
-    public static final String UPDATE_CHANNEL = "app_updates";
+    // Android 不允许提高已创建渠道的重要性，因此使用新 ID 把更新提升到高优先级。
+    public static final String UPDATE_CHANNEL = "app_updates_priority_v2";
     public static final String ANNOUNCEMENT_CHANNEL = "developer_announcements";
     private final Context context;
     private final NotificationManager manager;
@@ -121,8 +122,12 @@ public final class NotificationHelper {
     /** 公告使用独立默认重要性渠道，既能被系统展示，也允许用户单独调整打扰级别。 */
     public boolean announcement(Announcement announcement) {
         if (announcement == null || announcement.id <= 0) return false;
-        int id = 20_000 + (int) Math.abs(announcement.id % 10_000);
+        int id = announcementNotificationId(announcement.id);
         return show(id, null, announcement.title, announcement.content, ANNOUNCEMENT_CHANNEL);
+    }
+
+    public void cancelAnnouncement(long announcementId) {
+        manager.cancel(announcementNotificationId(announcementId));
     }
 
     private void show(int id, String roomId, String title, String body) {
@@ -171,7 +176,7 @@ public final class NotificationHelper {
         channel.setDescription("低余额、充值结果、登录失效和监测故障提醒");
         manager.createNotificationChannel(channel);
         NotificationChannel updates = new NotificationChannel(
-                UPDATE_CHANNEL, "应用更新", NotificationManager.IMPORTANCE_DEFAULT
+                UPDATE_CHANNEL, "应用更新", NotificationManager.IMPORTANCE_HIGH
         );
         updates.setDescription("新版本发布与必须更新提醒");
         manager.createNotificationChannel(updates);
@@ -180,5 +185,9 @@ public final class NotificationHelper {
         );
         announcements.setDescription("江理电小侠的服务通知、功能说明与校园用电公告");
         manager.createNotificationChannel(announcements);
+    }
+
+    private int announcementNotificationId(long announcementId) {
+        return 20_000 + (int) Math.abs(announcementId % 10_000);
     }
 }
