@@ -5,7 +5,8 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
@@ -216,7 +217,7 @@ final class HeroBaseController {
         }
         form.addView(signature);
         form.addView(content);
-        AlertDialog dialog = new AlertDialog.Builder(activity, R.style.BaseDialogTheme)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("意见反馈")
                 .setMessage("反馈会发送到开发者后台，不会附带房间信息。")
                 .setView(form)
@@ -268,7 +269,7 @@ final class HeroBaseController {
     }
 
     private void showInfo(String title, String message) {
-        new AlertDialog.Builder(activity, R.style.BaseDialogTheme)
+        new MaterialAlertDialogBuilder(activity)
                 .setTitle(title)
                 .setMessage(message)
                 .setPositiveButton("知道了", null)

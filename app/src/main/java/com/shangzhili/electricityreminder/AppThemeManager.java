@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.util.TypedValue;
 
+import androidx.appcompat.app.AppCompatDelegate;
+
 /**
  * 管理应用视觉主题，不保存任何房间配置或业务数据。
  *
@@ -50,8 +52,8 @@ public final class AppThemeManager {
     }
 
     public static void save(Context context, int mode) {
-        if (mode < MODE_BLUE || mode > MODE_PURPLE) mode = MODE_BLUE;
-        preferences(context).edit().putInt(KEY_THEME_MODE, mode).apply();
+        if (mode < MODE_BLUE || mode > MODE_PURPLE) mode = MODE_PURPLE;
+        preferences(context).edit().putInt(KEY_THEME_MODE, mode).commit();
     }
 
     /** 新安装默认深色；已经保存过显示模式的用户继续保留原选择。 */
@@ -63,9 +65,33 @@ public final class AppThemeManager {
 
     public static void saveAppearance(Context context, int mode) {
         if (mode < APPEARANCE_FOLLOW_SYSTEM || mode > APPEARANCE_DARK) {
-            mode = APPEARANCE_LIGHT;
+            mode = APPEARANCE_DARK;
         }
-        preferences(context).edit().putInt(KEY_APPEARANCE_MODE, mode).apply();
+        /*
+         * MaterialAlertDialogBuilder 内部由 AppCompatDelegate 解析 DayNight。旧实现只改
+         * Activity 的 Configuration，导致手机系统为浅色时，公告弹窗和页面使用两套
+         * 夜间状态。这里先同步持久化，再同步 AppCompat，最后由调用方 recreate。
+         */
+        preferences(context).edit().putInt(KEY_APPEARANCE_MODE, mode).commit();
+        syncMaterialNightMode(mode);
+    }
+
+    /** Application 启动时调用，让 Material 弹窗与 App 自定义显示模式从第一帧就一致。 */
+    public static void syncMaterialNightMode(Context context) {
+        syncMaterialNightMode(currentAppearance(context));
+    }
+
+    static int appCompatNightMode(int appearance) {
+        if (appearance == APPEARANCE_DARK) return AppCompatDelegate.MODE_NIGHT_YES;
+        if (appearance == APPEARANCE_LIGHT) return AppCompatDelegate.MODE_NIGHT_NO;
+        return AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM;
+    }
+
+    private static void syncMaterialNightMode(int appearance) {
+        int requested = appCompatNightMode(appearance);
+        if (AppCompatDelegate.getDefaultNightMode() != requested) {
+            AppCompatDelegate.setDefaultNightMode(requested);
+        }
     }
 
     /** 用一个整数同时比较品牌色和显示模式，供页面从设置页返回时判断是否需要重建。 */

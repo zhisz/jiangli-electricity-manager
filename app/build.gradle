@@ -43,8 +43,8 @@ android {
         applicationId = "com.zhisz.electricityreminder"
         minSdk = 26
         targetSdk = 36
-        versionCode = 50
-        versionName = "2.0.0"
+        versionCode = 54
+        versionName = "2.3.0"
         buildConfigField "String", "UPDATE_MANIFEST_URL", "\"${updateManifestUrl}\""
         buildConfigField "String", "ELEC_SERVICE_BASE_URL", "\"${elecServiceBaseUrl}\""
         buildConfigField "String", "XIAOFUBAO_SHIRO_JID", "\"${xiaofubaoShiroJid}\""
@@ -80,6 +80,10 @@ android {
 }
 
 dependencies {
+    // 现有工程继续使用 Java/XML；引入稳定的 Material 3 Views 组件即可统一弹窗、按钮、
+    // 卡片和主题，不必为一次视觉升级冒险重写全部业务为 Compose。
+    implementation "androidx.appcompat:appcompat:1.7.1"
+    implementation "com.google.android.material:material:1.14.0"
     implementation "androidx.work:work-runtime:2.11.2"
     testImplementation "junit:junit:4.13.2"
     // JVM 单元测试需要真实 org.json 实现，以回归校付宝订单响应的严格字段校验。

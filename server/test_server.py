@@ -103,6 +103,7 @@ class CollectorAdminParameterTests(unittest.TestCase):
 
     def test_task_metrics_separate_retained_and_current_round_scope(self):
         fragment = app_server.collector_task_fragment({
+            "collection_enabled": False,
             "latest_job": {
                 "total_rooms": 1412, "processed_rooms": 1412,
                 "success_count": 1412, "failure_count": 0,
@@ -117,13 +118,16 @@ class CollectorAdminParameterTests(unittest.TestCase):
             "current_building": "本轮已完成", "no_meter_count": 0,
             "covered_buildings": 12, "valid_rooms": 1412,
             "buildings": [], "failures": [],
-        })
+        }, "csrf-test")
         self.assertIn("总采集数", fragment)
         self.assertIn("总失败数", fragment)
         self.assertIn("本轮成功", fragment)
         self.assertIn("14120", fragment)
         self.assertIn("统计范围为服务器最近30天", fragment)
         self.assertNotIn("样本总数", fragment)
+        self.assertIn("自动采集已暂停", fragment)
+        self.assertIn("重新开启", fragment)
+        self.assertIn('name="csrf" value="csrf-test"', fragment)
 
 
 class AnalyticsStoreTests(unittest.TestCase):
@@ -179,6 +183,69 @@ class AnalyticsStoreTests(unittest.TestCase):
         stats = self.store.dashboard_stats(22)
         self.assertEqual(2, stats["latest_download_unique"])
         self.assertEqual(3, stats["latest_download_requests"])
+
+    def test_announcement_delivery_and_read_are_idempotent(self):
+        first_device = "a" * 64
+        second_device = "b" * 64
+        self.store.record_heartbeat(first_device, 50, "2.0.0")
+        self.store.record_heartbeat(second_device, 50, "2.0.0")
+        announcement_id = self.store.create_announcement("停机通知", "今晚服务维护")
+
+        first = self.store.deliver_announcements(first_device, 0)
+        self.store.deliver_announcements(first_device, 0)
+        self.assertEqual(announcement_id, first["announcements"][0]["id"])
+        self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
+        self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
+
+        item = self.store.list_announcements()[0]
+        self.assertEqual(2, item["target_count"])
+        self.assertEqual(1, item["delivered_count"])
+        self.assertEqual(1, item["read_count"])
+
+    def test_announcement_delivery_uses_server_receipt_not_client_cursor(self):
+        device = "c" * 64
+        first_id = self.store.create_announcement("第一条", "内容一")
+        second_id = self.store.create_announcement("第二条", "内容二")
+        items = self.store.deliver_announcements(device, first_id)
+        self.assertEqual(
+            [first_id, second_id],
+            [item["id"] for item in items["announcements"]],
+        )
+        self.assertFalse(self.store.mark_announcement_read(999_999, device))
+
+    def test_close_reopen_and_withdraw_have_distinct_behavior(self):
+        device = "d" * 64
+        announcement_id = self.store.create_announcement("测试公告", "状态测试")
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "close"))
+        closed = self.store.deliver_announcements(device, 0)
+        self.assertEqual([], closed["announcements"])
+
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "reopen"))
+        opened = self.store.deliver_announcements(device, 0)
+        self.assertEqual(announcement_id, opened["announcements"][0]["id"])
+
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "withdraw"))
+        withdrawn = self.store.deliver_announcements(device, 0)
+        self.assertEqual([announcement_id], withdrawn["withdrawn_ids"])
+        self.assertFalse(self.store.mark_announcement_read(announcement_id, device))
+
+    def test_withdrawn_announcement_is_irreversible(self):
+        announcement_id = self.store.create_announcement("撤回", "不能恢复")
+        self.assertTrue(self.store.change_announcement_state(announcement_id, "withdraw"))
+        self.assertFalse(self.store.change_announcement_state(announcement_id, "reopen"))
+        item = self.store.list_announcements()[0]
+        self.assertEqual(1, item["withdrawn"])
+        self.assertEqual(0, item["active"])
+
+    def test_announcement_admin_page_escapes_user_visible_content(self):
+        announcement_id = self.store.create_announcement("<标题>", "正文 <script>")
+        page = app_server.announcements_page(
+            self.store.list_announcements(), "safe-csrf"
+        )
+        self.assertIn(f"公告 #{announcement_id}", page)
+        self.assertIn("&lt;标题&gt;", page)
+        self.assertIn("正文 &lt;script&gt;", page)
+        self.assertNotIn("正文 <script>", page)
 
 
 class ServiceTests(unittest.TestCase):
@@ -289,6 +356,14 @@ class ServiceTests(unittest.TestCase):
             ["0.17.0", "0.16.1", "0.16.0"],
             [item["version"] for item in releases],
         )
+
+    def test_formal_jiangli_apk_is_in_release_history(self):
+        formal = self.settings.download_dir / "jiangli-electricity-2.1.0.apk"
+        formal.write_bytes(b"formal apk")
+        service = app_server.ElecService(self.settings)
+        releases = service.available_releases()
+        self.assertEqual("2.1.0", releases[0]["version"])
+        self.assertEqual(formal.name, releases[0]["filename"])
 
 
 if __name__ == "__main__":

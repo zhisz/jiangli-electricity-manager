@@ -2,7 +2,8 @@ package com.shangzhili.electricityreminder;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -127,7 +128,7 @@ public final class MainActivity extends Activity {
      */
     private void showMonitoringGuideForNewRoom(String roomId) {
         renderRooms();
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("房间已添加")
                 .setMessage("是否现在开启余额监测与低余额提醒？")
                 .setCancelable(false)
@@ -167,7 +168,7 @@ public final class MainActivity extends Activity {
         }
         // 先记录“已展示”，避免旋转屏幕或系统重建 Activity 时连续弹出多个对话框。
         setupPreferences.markOnboardingShown();
-        firstUseGuide = new AlertDialog.Builder(this)
+        firstUseGuide = new MaterialAlertDialogBuilder(this)
                 .setTitle("首次使用设置")
                 .setMessage("为了在 App 退出后仍能按时提醒，需要检查通知权限、精确闹钟、"
                         + "电池优化和厂商自启动。\n\n"
@@ -190,7 +191,7 @@ public final class MainActivity extends Activity {
     private void showFormalReleaseMigrationNoticeIfNeeded() {
         if (setupPreferences.hasShownFormalReleaseNotice()) return;
         setupPreferences.markFormalReleaseNoticeShown();
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("已切换到备案正式版")
                 .setMessage("如果桌面上还保留旧调试版“江理电小侠”，请先确认当前正式版可以正常打开，随后手动删除旧版。\n\n"
                         + "由于 Android 不允许不同包名和签名共享本地数据，正式版需要重新添加房间。以后更新会直接覆盖正式版，不再需要重复迁移。")

@@ -22,18 +22,38 @@ public final class ElecApplication extends Application
     private boolean inForeground;
     private boolean foregroundUsageHandled;
     private boolean foregroundUpdateHandled;
+    private boolean foregroundAnnouncementHandled;
     private Activity managerActivity;
     private AppUpdateManager updateManager;
     private final Runnable confirmBackground = () -> {
         if (startedActivities == 0) endForegroundSession();
     };
+    private final Runnable showAnnouncementsWhenSafe = new Runnable() {
+        @Override public void run() {
+            Activity activity = managerActivity;
+            if (!inForeground || foregroundAnnouncementHandled || activity == null) return;
+            if (activity instanceof RechargePaymentActivity
+                    || (activity instanceof MainActivity
+                    && ((MainActivity) activity).isFirstUseGuideShowing())
+                    || (updateManager != null && updateManager.isDialogShowing())) {
+                mainHandler.postDelayed(this, 700L);
+                return;
+            }
+            foregroundAnnouncementHandled = true;
+            AnnouncementCenter.checkAndShow(activity);
+        }
+    };
 
     @Override
     public void onCreate() {
         super.onCreate();
+        // Material 弹窗使用 AppCompat 的 DayNight；必须在创建任何通知渠道或弹窗前同步。
+        AppThemeManager.syncMaterialNightMode(this);
         registerActivityLifecycleCallbacks(this);
         // 持久化低频版本检查，普通划掉后台后仍可由系统在合适时机发送新版本通知。
         UpdateNotificationWorker.schedulePeriodic(this);
+        AnnouncementWorker.schedule(this);
+        RemoteMessageScheduler.ensureScheduled(this);
     }
 
     @Override
@@ -44,6 +64,7 @@ public final class ElecApplication extends Application
             inForeground = true;
             foregroundUsageHandled = false;
             foregroundUpdateHandled = false;
+            foregroundAnnouncementHandled = false;
         }
     }
 
@@ -56,6 +77,9 @@ public final class ElecApplication extends Application
             UsageReporter.reportForeground(this);
         }
         requestUpdateWhenSafe(activity);
+        // 给强制/可选更新检查更高优先级，避免两个服务弹窗在首页互相覆盖。
+        mainHandler.removeCallbacks(showAnnouncementsWhenSafe);
+        mainHandler.postDelayed(showAnnouncementsWhenSafe, 2_000L);
     }
 
     /**
@@ -108,6 +132,8 @@ public final class ElecApplication extends Application
         inForeground = false;
         foregroundUsageHandled = false;
         foregroundUpdateHandled = false;
+        foregroundAnnouncementHandled = false;
+        mainHandler.removeCallbacks(showAnnouncementsWhenSafe);
         destroyUpdateManager();
     }
 

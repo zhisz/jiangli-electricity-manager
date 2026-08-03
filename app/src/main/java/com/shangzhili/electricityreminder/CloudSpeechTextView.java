@@ -5,10 +5,10 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
-import android.widget.TextView;
+import androidx.appcompat.widget.AppCompatTextView;
 
 /** 随主题着色的云朵对话气泡，底部小尾巴朝向电小侠角色。 */
-public final class CloudSpeechTextView extends TextView {
+public final class CloudSpeechTextView extends AppCompatTextView {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path cloud = new Path();

@@ -1,7 +1,8 @@
 package com.shangzhili.electricityreminder;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -256,7 +257,7 @@ public final class RoomDetailActivity extends Activity {
                     if (isFinishing() || isDestroyed()) return;
                     if (!context.canBuy) {
                         setRechargeBusy(false, null);
-                        new AlertDialog.Builder(this)
+                        new MaterialAlertDialogBuilder(this)
                                 .setTitle("当前暂不可充值")
                                 .setMessage("校付宝暂未允许该房间充值，请稍后再试。")
                                 .setPositiveButton("知道了", null)
@@ -299,7 +300,7 @@ public final class RoomDetailActivity extends Activity {
         ));
         populateRechargeSuggestions(suggestions, amountInput, context);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("电费充值")
                 .setView(content)
                 .setNegativeButton("取消", (ignored, which) ->
@@ -495,7 +496,7 @@ public final class RoomDetailActivity extends Activity {
         long startedAt = SystemClock.elapsedRealtime();
         setRechargeBusy(true, "正在确认到账…");
 
-        rechargeVerificationDialog = new AlertDialog.Builder(this)
+        rechargeVerificationDialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("正在确认到账")
                 .setMessage("正在查询校付宝官方订单…")
                 .setCancelable(true)
@@ -865,7 +866,7 @@ public final class RoomDetailActivity extends Activity {
 
         claimedRechargeResultNotice = attempt;
         rechargeResultAcknowledged = false;
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
         if (RechargeAttempt.STATUS_CONFIRMED.equals(attempt.resultNotice)) {
             refreshHistory();
             String message = "校付宝官方订单已确认支付成功，"
@@ -1005,7 +1006,7 @@ public final class RoomDetailActivity extends Activity {
             message += "\n\n如果错误发生在确认下单之后，请不要连续重试，"
                     + "先稍候并检查该房间是否已有处理中订单。";
         }
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle(title)
                 .setMessage(message)
                 .setPositiveButton("知道了", null)

@@ -2,7 +2,6 @@ package com.shangzhili.electricityreminder;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -15,13 +14,16 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.widget.Button;
-import android.widget.RadioGroup;
+import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 /** 集中展示并修复后台提醒所需的系统设置。 */
 public final class SystemSettingsActivity extends Activity {
@@ -57,6 +59,7 @@ public final class SystemSettingsActivity extends Activity {
         autoStartConfirmButton = findViewById(R.id.autoStartConfirmButton);
         setupThemeSelector();
         setupAppearanceSelector();
+        setupProgressiveDisclosure();
 
         findViewById(R.id.settingsBackButton).setOnClickListener(view -> finish());
         findViewById(R.id.openNotificationSettingsButton)
@@ -90,13 +93,14 @@ public final class SystemSettingsActivity extends Activity {
 
     /** 初始化时先勾选当前模式，再注册监听，避免页面打开就触发一次无意义的 recreate。 */
     private void setupThemeSelector() {
-        RadioGroup group = findViewById(R.id.themeModeGroup);
+        MaterialButtonToggleGroup group = findViewById(R.id.themeModeGroup);
         int current = AppThemeManager.current(this);
         group.check(current == AppThemeManager.MODE_JADE
                 ? R.id.themeJadeRadio
                 : current == AppThemeManager.MODE_PURPLE
                 ? R.id.themePurpleRadio : R.id.themeBlueRadio);
-        group.setOnCheckedChangeListener((ignored, checkedId) -> {
+        group.addOnButtonCheckedListener((ignored, checkedId, isChecked) -> {
+            if (!isChecked) return;
             int selected = checkedId == R.id.themeJadeRadio
                     ? AppThemeManager.MODE_JADE
                     : checkedId == R.id.themePurpleRadio
@@ -112,13 +116,14 @@ public final class SystemSettingsActivity extends Activity {
      * 选择后重建当前页面，使夜间限定资源从布局加载阶段就生效，避免短暂闪白。
      */
     private void setupAppearanceSelector() {
-        RadioGroup group = findViewById(R.id.appearanceModeGroup);
+        MaterialButtonToggleGroup group = findViewById(R.id.appearanceModeGroup);
         int current = AppThemeManager.currentAppearance(this);
         group.check(current == AppThemeManager.APPEARANCE_DARK
                 ? R.id.appearanceDarkRadio
                 : current == AppThemeManager.APPEARANCE_FOLLOW_SYSTEM
                 ? R.id.appearanceSystemRadio : R.id.appearanceLightRadio);
-        group.setOnCheckedChangeListener((ignored, checkedId) -> {
+        group.addOnButtonCheckedListener((ignored, checkedId, isChecked) -> {
+            if (!isChecked) return;
             int selected = checkedId == R.id.appearanceDarkRadio
                     ? AppThemeManager.APPEARANCE_DARK
                     : checkedId == R.id.appearanceSystemRadio
@@ -127,6 +132,27 @@ public final class SystemSettingsActivity extends Activity {
             if (selected == AppThemeManager.currentAppearance(this)) return;
             AppThemeManager.saveAppearance(this, selected);
             recreate();
+        });
+    }
+
+    /**
+     * 低频系统权限和品牌色默认收起，首屏只保留“是否就绪”和深浅模式。展开仅改变布局，
+     * 不会清空输入或触发系统设置；因此用户可以在同一页按需深入，而不必面对长表单。
+     */
+    private void setupProgressiveDisclosure() {
+        View systemContent = findViewById(R.id.advancedSystemContent);
+        Button systemToggle = findViewById(R.id.systemDetailsToggle);
+        systemToggle.setOnClickListener(view -> {
+            boolean expand = systemContent.getVisibility() != View.VISIBLE;
+            systemContent.setVisibility(expand ? View.VISIBLE : View.GONE);
+            systemToggle.setText(expand ? "收起系统设置" : "查看系统设置");
+        });
+        View themeContent = findViewById(R.id.themeDetailsContent);
+        Button themeToggle = findViewById(R.id.themeDetailsToggle);
+        themeToggle.setOnClickListener(view -> {
+            boolean expand = themeContent.getVisibility() != View.VISIBLE;
+            themeContent.setVisibility(expand ? View.VISIBLE : View.GONE);
+            themeToggle.setText(expand ? "收起主题颜色" : "更改主题颜色");
         });
     }
 
@@ -314,7 +340,7 @@ public final class SystemSettingsActivity extends Activity {
 
     /** 使用基地同款暖白弹窗，避免系统默认灰色面板破坏深浅主题下的品牌一致性。 */
     private void showInfo(String title, String message) {
-        new AlertDialog.Builder(this, R.style.BaseDialogTheme)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle(title)
                 .setMessage(message)
                 .setPositiveButton("知道了", null)

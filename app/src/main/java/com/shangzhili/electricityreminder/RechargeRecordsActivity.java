@@ -1,7 +1,7 @@
 package com.shangzhili.electricityreminder;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Context;
@@ -212,7 +212,7 @@ public final class RechargeRecordsActivity extends Activity {
     }
 
     private void confirmDelete(RechargeRecord record) {
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("删除充值记录")
                 .setMessage(String.format(
                         Locale.CHINA, "确认删除 %s %02d:%02d 的 %.2f 元充值记录？",
