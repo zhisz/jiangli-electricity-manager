@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 51,
-  "versionName": "2.1.0",
-  "minSupportedVersionCode": 50,
-  "forceUpdate": false,
-  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.1.0.apk",
+  "versionCode": 52,
+  "versionName": "2.1.1",
+  "minSupportedVersionCode": 52,
+  "forceUpdate": true,
+  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.1.1.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "新增开发者公告与已读统计；主要弹窗升级为 Material 3；设置页按使用频率重新整理。"
+  "releaseNotes": "修复公告弹窗出现后界面被切换为浅色、且设置页无法重新切回深色的问题。统一 Activity 与 Material 弹窗的夜间模式状态，并修复主题按钮选择事件。"
 }

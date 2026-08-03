@@ -153,14 +153,17 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/appearanceSystemRadio" style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:checkable="true"
                         android:text="跟随系统" />
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/appearanceLightRadio" style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:checkable="true"
                         android:text="浅色" />
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/appearanceDarkRadio" style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:checkable="true"
                         android:text="深色" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -177,13 +180,16 @@
                         app:selectionRequired="true" app:singleSelection="true">
                         <com.google.android.material.button.MaterialButton android:id="@+id/themeBlueRadio"
                             style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
-                            android:layout_height="48dp" android:layout_weight="1" android:text="学院蓝" />
+                            android:layout_height="48dp" android:layout_weight="1" android:checkable="true"
+                            android:text="学院蓝" />
                         <com.google.android.material.button.MaterialButton android:id="@+id/themeJadeRadio"
                             style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
-                            android:layout_height="48dp" android:layout_weight="1" android:text="清新绿" />
+                            android:layout_height="48dp" android:layout_weight="1" android:checkable="true"
+                            android:text="清新绿" />
                         <com.google.android.material.button.MaterialButton android:id="@+id/themePurpleRadio"
                             style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
-                            android:layout_height="48dp" android:layout_weight="1" android:text="静雅紫" />
+                            android:layout_height="48dp" android:layout_weight="1" android:checkable="true"
+                            android:text="静雅紫" />
                     </com.google.android.material.button.MaterialButtonToggleGroup>
                 </LinearLayout>
             </LinearLayout>

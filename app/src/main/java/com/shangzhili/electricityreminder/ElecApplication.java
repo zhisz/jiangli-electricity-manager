@@ -47,6 +47,8 @@ public final class ElecApplication extends Application
     @Override
     public void onCreate() {
         super.onCreate();
+        // Material 弹窗使用 AppCompat 的 DayNight；必须在创建任何通知渠道或弹窗前同步。
+        AppThemeManager.syncMaterialNightMode(this);
         registerActivityLifecycleCallbacks(this);
         // 持久化低频版本检查，普通划掉后台后仍可由系统在合适时机发送新版本通知。
         UpdateNotificationWorker.schedulePeriodic(this);

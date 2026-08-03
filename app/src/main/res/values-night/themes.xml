@@ -4,7 +4,7 @@
         夜间限定资源只替换公共基础主题；三套品牌色继续继承此主题，
         从而避免维护三份重复的深色控件规范。
     -->
-    <style name="AppThemeBase" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="AppThemeBase" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/page_background</item>
         <item name="android:navigationBarColor">@color/page_background</item>
