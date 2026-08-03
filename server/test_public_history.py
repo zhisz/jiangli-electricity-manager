@@ -43,6 +43,18 @@ class PublicHistoryStoreTests(unittest.TestCase):
         self.assertEqual(1, self.count("samples"))
         self.assertEqual(0, self.count("change_events"))
 
+    def test_collector_pause_is_persistent_and_visible_in_overview(self):
+        """后台暂停不能只存在于当前进程内，服务重启后也必须继续保持暂停。"""
+
+        self.assertTrue(self.store.collector_enabled())
+        self.store.set_collector_enabled(False)
+        reopened = history.PublicHistoryStore(self.database)
+        self.assertFalse(reopened.collector_enabled())
+        self.assertFalse(reopened.collector_task_overview()["collection_enabled"])
+
+        reopened.set_collector_enabled(True)
+        self.assertTrue(self.store.collector_enabled())
+
     def test_failed_slot_can_be_repaired_without_duplicate(self):
         slot = "2026-07-31T08:00:00+08:00"
         self.store.record_sample(

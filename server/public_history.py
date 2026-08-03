@@ -276,6 +276,16 @@ class PublicHistoryStore:
                 (key, value),
             )
 
+    def collector_enabled(self) -> bool:
+        """采集总开关默认开启；值落库后可跨进程重启保持暂停状态。"""
+
+        return self.metadata("collector_enabled", "1") == "1"
+
+    def set_collector_enabled(self, enabled: bool) -> None:
+        """只修改调度开关，不删除目录、样本、事件或正在使用的 App 公共历史。"""
+
+        self.set_metadata("collector_enabled", "1" if enabled else "0")
+
     def replace_building_directory(
         self, building_code: str, entries: list[RoomEntry], synced_at: str
     ) -> None:
@@ -696,6 +706,7 @@ class PublicHistoryStore:
             else:
                 current_building = "本轮已完成"
         return {
+            "collection_enabled": self.collector_enabled(),
             "latest_job": dict(latest_job) if latest_job else None,
             "buildings": building_list,
             "covered_buildings": sum(1 for row in building_list if row["room_count"]),
@@ -1134,6 +1145,10 @@ class PublicHistoryCollector:
             item["code"]: item for item in self.client.query_buildings()
         }
         for building_code, configured_name in TARGET_BUILDINGS.items():
+            if not self.store.collector_enabled():
+                # 目录按整栋成功后才替换，暂停时直接保留尚未处理楼栋的旧目录；同时
+                # 不写“今日同步完成”标记，重新开启后仍会继续一次完整目录同步。
+                return {**result, "paused": True}
             if building_code not in buildings:
                 result["failures"][building_code] = "building_missing"
                 continue
@@ -1141,6 +1156,8 @@ class PublicHistoryCollector:
                 entries: dict[str, RoomEntry] = {}
                 floors = self.client.query_floors(building_code)
                 for floor in floors:
+                    if not self.store.collector_enabled():
+                        return {**result, "paused": True}
                     for room in self.client.query_rooms(building_code, floor["code"]):
                         room_code = room["code"]
                         # 精确校验代码层级，第三方脏数据不能跨楼栋进入采集范围。
@@ -1198,8 +1215,14 @@ class PublicHistoryCollector:
         building_stats: dict[str, Counter[str]] = defaultdict(Counter)
         slot_time = iso_shanghai(slot.replace(minute=0, second=0, microsecond=0))
         try:
+            # 后台手动暂停后不再创建新任务；这一判断与调度器判断互为保险，避免
+            # 按钮点击恰好撞上整点调度时仍启动一轮采集。
+            if not self.store.collector_enabled():
+                return False
             if self.directory_sync_due() or not self.store.active_rooms():
                 self.sync_directory()
+            if not self.store.collector_enabled():
+                return False
             rooms = self.store.active_rooms()
             job_id = self.store.start_job(slot_time, len(rooms))
             if not rooms:
@@ -1208,6 +1231,14 @@ class PublicHistoryCollector:
                 )
                 return False
             for room in rooms:
+                # 暂停采用协作式停止：当前正在进行的单个 HTTP 请求允许自然结束，
+                # 下一房间开始前立即退出，因此不会粗暴中断数据库事务或留下坏数据。
+                if not self.store.collector_enabled():
+                    self.store.finish_job(
+                        job_id, "paused", started, processed, success, failure,
+                        building_stats, "collector_paused",
+                    )
+                    return False
                 result = self.client.query_balance(room)
                 self.store.record_sample(slot_time, room, result)
                 self.store.mark_room_error(room.room_code, result.error_type)
@@ -1285,6 +1316,9 @@ class CollectorScheduler:
 
     def _loop(self) -> None:
         while not self._stop.wait(15):
+            # 开关保存在 SQLite，而不是仅放在内存中；服务重启后仍尊重开发者暂停。
+            if not self.collector.store.collector_enabled():
+                continue
             now = shanghai_now()
             if not is_collection_dispatch_time(now):
                 continue

@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 53,
-  "versionName": "2.2.0",
-  "minSupportedVersionCode": 53,
+  "versionCode": 54,
+  "versionName": "2.3.0",
+  "minSupportedVersionCode": 54,
   "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.2.0.apk",
+  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.3.0.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "新增15分钟后台远程消息检查，更新始终优先于公告；公告支持关闭、重新开启和撤回，撤回后客户端会清除待读内容与通知。"
+  "releaseNotes": "修复系统下载任务无进度时更新页面长期卡住的问题，新增实时下载进度、状态轮询和重新下载入口；开发者后台新增可持久化的云端采集启停开关。"
 }

@@ -967,7 +967,8 @@ class Handler(BaseHTTPRequestHandler):
                     parameters["events"]["day"] = distribution["day"]
                 event_page = store.collector_events(**parameters["events"])
                 self._send_html(HTTPStatus.OK, collector_page(
-                    task, event_page, distribution, parameters
+                    task, event_page, distribution, parameters,
+                    self.service.csrf_token(session),
                 ))
             except (sqlite3.Error, ValueError) as exception:
                 self._send_html(
@@ -1001,10 +1002,37 @@ class Handler(BaseHTTPRequestHandler):
             self._publish_announcement()
         elif path == "/admin/announcements/action":
             self._change_announcement_state()
+        elif path == "/admin/collector/state":
+            self._change_collector_state()
         else:
             self._send_bytes(
                 HTTPStatus.NOT_FOUND, b"not found\n", "text/plain; charset=utf-8"
             )
+
+    def _change_collector_state(self) -> None:
+        """持久化启停云端采集；暂停不会影响已经保存的公共历史读取。"""
+
+        session = self._session_token()
+        if not session:
+            self._redirect("/admin/login")
+            return
+        try:
+            form = urllib.parse.parse_qs(
+                self._read_body().decode("utf-8"), keep_blank_values=True
+            )
+            csrf = form.get("csrf", [""])[0]
+            action = form.get("action", [""])[0]
+            if not hmac.compare_digest(csrf, self.service.csrf_token(session)):
+                self._send_bytes(HTTPStatus.FORBIDDEN, b"forbidden\n", "text/plain")
+                return
+            if action not in {"enable", "disable"}:
+                raise ValueError("invalid collector action")
+            if self.service.public_history_store is None:
+                raise sqlite3.OperationalError("公共历史数据库暂不可用")
+            self.service.public_history_store.set_collector_enabled(action == "enable")
+            self._redirect("/admin/collector")
+        except (ValueError, UnicodeError, sqlite3.Error):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
 
     def _heartbeat(self) -> None:
         try:
@@ -1892,6 +1920,7 @@ def collector_page(
     event_page: dict[str, Any],
     distribution: dict[str, Any],
     parameters: dict[str, Any],
+    csrf: str = "",
 ) -> str:
     """单页采集控制台：实时任务、可分页事件和按日时段分析相互独立。"""
 
@@ -1939,7 +1968,7 @@ def collector_page(
         </header>
         <main class="collector-main">
           <div class="collector-workspace">
-            {collector_task_fragment(task)}
+            {collector_task_fragment(task, csrf)}
             <section class="panel distribution-panel" id="distribution-section">
               <div id="distribution-results">
                 {collector_distribution_fragment(
@@ -1980,7 +2009,7 @@ def collector_page(
     )
 
 
-def collector_task_fragment(task: dict[str, Any]) -> str:
+def collector_task_fragment(task: dict[str, Any], csrf: str = "") -> str:
     latest = task["latest_job"]
     if not latest:
         return '<section class="panel task-card"><p class="muted">尚无采集任务</p></section>'
@@ -1994,7 +2023,8 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
         f'{float(latest["duration_seconds"]):.1f} 秒'
         if latest["duration_seconds"] is not None else "执行中"
     )
-    status = {"running": "采集中", "completed": "已完成", "failed": "异常结束"}.get(
+    status = {"running": "采集中", "completed": "已完成", "failed": "异常结束",
+              "paused": "已暂停"}.get(
         str(latest["status"]), str(latest["status"])
     )
     status_class = "status-ok" if failure == 0 else "status-warning"
@@ -2040,12 +2070,26 @@ def collector_task_fragment(task: dict[str, Any]) -> str:
           </div>
         </details>"""
     finished_at = latest["finished_at"] or latest["started_at"]
+    collector_enabled = bool(task.get("collection_enabled", True))
+    collector_action = "disable" if collector_enabled else "enable"
+    collector_button = "暂停采集" if collector_enabled else "重新开启"
+    collector_state = "自动采集已开启" if collector_enabled else "自动采集已暂停"
     return f"""
     <section class="panel task-card">
       <div class="task-head">
         <div><div class="eyebrow">CURRENT COLLECTION</div><h2>当前采集任务</h2>
           <p class="muted">任务时间 {html.escape(_compact_time(str(latest["slot_time"])))}</p></div>
-        <span class="status-label {status_class}">{html.escape(status)}</span>
+        <div class="inline-actions">
+          <span class="status-label {'status-ok' if collector_enabled else 'status-warning'}">
+            {collector_state}</span>
+          <span class="status-label {status_class}">{html.escape(status)}</span>
+          <form method="post" action="/admin/collector/state">
+            <input type="hidden" name="csrf" value="{html.escape(csrf)}">
+            <input type="hidden" name="action" value="{collector_action}">
+            <button class="{'danger-button' if collector_enabled else 'secondary'}" type="submit">
+              {collector_button}</button>
+          </form>
+        </div>
       </div>
       <div class="task-primary">
         <div class="round-display"><span>当前轮次</span>

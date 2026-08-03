@@ -13,6 +13,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
@@ -45,6 +47,7 @@ public final class AppUpdateManager {
     private static final String KEY_TARGET_NOTES = "targetReleaseNotes";
     private static final String KEY_TARGET_MANDATORY = "targetMandatory";
     private static final String KEY_TARGET_VERIFIED = "targetVerified";
+    private static final String KEY_DOWNLOAD_STARTED_AT = "downloadStartedAt";
     private static final String KEY_CACHED_FORCE_CODE = "cachedForceVersionCode";
     private static final String KEY_CACHED_FORCE_NAME = "cachedForceVersionName";
     private static final String KEY_CACHED_FORCE_URL = "cachedForceApkUrl";
@@ -65,6 +68,13 @@ public final class AppUpdateManager {
     private AlertDialog blockingDialog;
     private AlertDialog readyDialog;
     private AlertDialog updateDialog;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable downloadStatusPoll = new Runnable() {
+        @Override public void run() {
+            if (!activityUsable() || pendingDownloadId() == NO_DOWNLOAD) return;
+            handlePendingDownload();
+        }
+    };
 
     /** 供应用级生命周期协调器错开公告弹窗，避免两个重要消息同时覆盖。 */
     boolean isDialogShowing() {
@@ -190,6 +200,7 @@ public final class AppUpdateManager {
             updateDialog.dismiss();
             updateDialog = null;
         }
+        mainHandler.removeCallbacks(downloadStatusPoll);
         if (receiverRegistered) {
             try {
                 activity.unregisterReceiver(downloadReceiver);
@@ -265,7 +276,10 @@ public final class AppUpdateManager {
                     );
             long id = downloadManager.enqueue(request);
             savePendingDownload(id, info, mandatory);
-            if (mandatory) showDownloadingDialog(info.versionName);
+            if (mandatory) {
+                showDownloadingDialog(info.versionName, "正在向系统下载服务提交任务…");
+                scheduleDownloadPoll(500L);
+            }
             else toast("更新已开始下载，完成后将提示安装");
         } catch (RuntimeException exception) {
             showDownloadFailure(info, mandatory, "无法开始下载：" + safeMessage(exception));
@@ -292,7 +306,8 @@ public final class AppUpdateManager {
                 int reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
                 failPending("更新下载失败（代码 " + reason + "）");
             } else if (isPendingMandatory()) {
-                showDownloadingDialog(pendingVersionName());
+                showDownloadingDialog(pendingVersionName(), downloadStatusText(cursor, status));
+                scheduleDownloadPoll(1_000L);
             }
         } catch (RuntimeException exception) {
             failPending("读取更新下载状态失败：" + safeMessage(exception));
@@ -410,11 +425,18 @@ public final class AppUpdateManager {
         dialog.show();
     }
 
-    private void showDownloadingDialog(String versionName) {
-        if (!activityUsable() || (blockingDialog != null && blockingDialog.isShowing())) return;
+    private void showDownloadingDialog(String versionName, String statusText) {
+        if (!activityUsable()) return;
+        String message = "版本 " + versionName + "\n\n" + statusText
+                + "\n\n如果长时间没有进度，可直接重新创建下载任务。";
+        if (blockingDialog != null && blockingDialog.isShowing()) {
+            blockingDialog.setMessage(message);
+            return;
+        }
         blockingDialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("正在下载必要更新")
-                .setMessage("版本 " + versionName + " 正在后台下载，请稍候。")
+                .setMessage(message)
+                .setPositiveButton("重新下载", (dialog, which) -> restartPendingDownload())
                 .setNegativeButton("退出应用", (dialog, which) -> exitApplication())
                 .create();
         blockingDialog.setCancelable(false);
@@ -475,6 +497,7 @@ public final class AppUpdateManager {
                 .putString(KEY_TARGET_NOTES, info.releaseNotes)
                 .putBoolean(KEY_TARGET_MANDATORY, mandatory)
                 .putBoolean(KEY_TARGET_VERIFIED, false)
+                .putLong(KEY_DOWNLOAD_STARTED_AT, System.currentTimeMillis())
                 .apply();
     }
 
@@ -498,6 +521,7 @@ public final class AppUpdateManager {
                 .remove(KEY_TARGET_NOTES)
                 .remove(KEY_TARGET_MANDATORY)
                 .remove(KEY_TARGET_VERIFIED)
+                .remove(KEY_DOWNLOAD_STARTED_AT)
                 .apply();
     }
 
@@ -584,10 +608,52 @@ public final class AppUpdateManager {
     }
 
     private void dismissBlockingDialog() {
+        mainHandler.removeCallbacks(downloadStatusPoll);
         if (blockingDialog != null) {
             blockingDialog.dismiss();
             blockingDialog = null;
         }
+    }
+
+    private void restartPendingDownload() {
+        UpdateInfo info = pendingInfo();
+        boolean mandatory = isPendingMandatory();
+        discardPendingDownload();
+        beginDownload(info, mandatory);
+    }
+
+    private void scheduleDownloadPoll(long delayMillis) {
+        mainHandler.removeCallbacks(downloadStatusPoll);
+        mainHandler.postDelayed(downloadStatusPoll, delayMillis);
+    }
+
+    /** 将 DownloadManager 的内部状态翻译为用户可判断的进度，而不是永久显示一句“请稍候”。 */
+    private String downloadStatusText(Cursor cursor, int status) {
+        long downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+        long total = cursor.getLong(cursor.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+        if (status == DownloadManager.STATUS_RUNNING) {
+            if (total > 0) {
+                int percent = (int) Math.min(100, downloaded * 100L / total);
+                return "已下载 " + percent + "%（" + formatMegabytes(downloaded)
+                        + " / " + formatMegabytes(total) + "）";
+            }
+            return "正在下载，已接收 " + formatMegabytes(downloaded);
+        }
+        int reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+        long waitingSeconds = Math.max(0L, (
+                System.currentTimeMillis() - preferences.getLong(
+                        KEY_DOWNLOAD_STARTED_AT, System.currentTimeMillis())) / 1_000L);
+        if (status == DownloadManager.STATUS_PAUSED) {
+            return "系统已暂停下载（原因代码 " + reason + "，已等待 "
+                    + waitingSeconds + " 秒）";
+        }
+        return "正在等待系统下载服务（已等待 " + waitingSeconds + " 秒）";
+    }
+
+    private String formatMegabytes(long bytes) {
+        return String.format(Locale.CHINA, "%.1f MB", Math.max(0L, bytes) / 1048576.0);
     }
 
     /** 所有强制更新阶段统一从这里退出，确保重新启动时一定创建新的更新检查会话。 */

@@ -103,6 +103,7 @@ class CollectorAdminParameterTests(unittest.TestCase):
 
     def test_task_metrics_separate_retained_and_current_round_scope(self):
         fragment = app_server.collector_task_fragment({
+            "collection_enabled": False,
             "latest_job": {
                 "total_rooms": 1412, "processed_rooms": 1412,
                 "success_count": 1412, "failure_count": 0,
@@ -117,13 +118,16 @@ class CollectorAdminParameterTests(unittest.TestCase):
             "current_building": "本轮已完成", "no_meter_count": 0,
             "covered_buildings": 12, "valid_rooms": 1412,
             "buildings": [], "failures": [],
-        })
+        }, "csrf-test")
         self.assertIn("总采集数", fragment)
         self.assertIn("总失败数", fragment)
         self.assertIn("本轮成功", fragment)
         self.assertIn("14120", fragment)
         self.assertIn("统计范围为服务器最近30天", fragment)
         self.assertNotIn("样本总数", fragment)
+        self.assertIn("自动采集已暂停", fragment)
+        self.assertIn("重新开启", fragment)
+        self.assertIn('name="csrf" value="csrf-test"', fragment)
 
 
 class AnalyticsStoreTests(unittest.TestCase):

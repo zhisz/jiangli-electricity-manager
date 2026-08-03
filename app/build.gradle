@@ -43,8 +43,8 @@ android {
         applicationId = "com.zhisz.electricityreminder"
         minSdk = 26
         targetSdk = 36
-        versionCode = 53
-        versionName = "2.2.0"
+        versionCode = 54
+        versionName = "2.3.0"
         buildConfigField "String", "UPDATE_MANIFEST_URL", "\"${updateManifestUrl}\""
         buildConfigField "String", "ELEC_SERVICE_BASE_URL", "\"${elecServiceBaseUrl}\""
         buildConfigField "String", "XIAOFUBAO_SHIRO_JID", "\"${xiaofubaoShiroJid}\""
