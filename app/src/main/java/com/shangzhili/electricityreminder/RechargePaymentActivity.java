@@ -2,7 +2,7 @@ package com.shangzhili.electricityreminder;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -260,7 +260,7 @@ public final class RechargePaymentActivity extends Activity {
     private void showPaymentError(String message, boolean showBrowserFallback) {
         if (isFinishing() || isDestroyed() || errorDialogShowing) return;
         errorDialogShowing = true;
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.recharge_payment_error_title)
                 .setMessage(message)
                 .setOnDismissListener(ignored -> errorDialogShowing = false)

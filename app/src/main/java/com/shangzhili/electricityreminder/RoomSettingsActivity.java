@@ -1,7 +1,7 @@
 package com.shangzhili.electricityreminder;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -160,7 +160,7 @@ public final class RoomSettingsActivity extends Activity {
 
     private void confirmDisableMonitoring() {
         if (!repository.isMonitoringEnabled(roomId)) return;
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("关闭余额监测")
                 .setMessage("将停止整点查询和低余额重复提醒，但保留房间、历史和图表数据。")
                 .setNegativeButton("取消", null)
@@ -175,7 +175,7 @@ public final class RoomSettingsActivity extends Activity {
     }
 
     private void confirmDelete() {
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("删除房间")
                 .setMessage("将删除该房间配置、历史曲线和后台提醒，且无法恢复。")
                 .setNegativeButton("取消", null)

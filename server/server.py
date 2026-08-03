@@ -63,9 +63,11 @@ IDENTITY_PATTERN = re.compile(
 )
 APK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+\.apk$")
 RELEASE_APK_PATTERN = re.compile(
-    r"^electricity-reminder-(\d+)\.(\d+)\.(\d+)\.apk$"
+    r"^(?:electricity-reminder|jiangli-electricity)-(\d+)\.(\d+)\.(\d+)\.apk$"
 )
-MAX_BODY_BYTES = 8 * 1024
+# 公告后台使用 application/x-www-form-urlencoded；中文被百分号编码后体积会明显膨胀。
+# 64 KiB 仍是很小的硬上限，随后各接口还会执行更严格的字段长度校验。
+MAX_BODY_BYTES = 64 * 1024
 SESSION_SECONDS = 8 * 60 * 60
 PBKDF2_ALGORITHM = "pbkdf2_sha256"
 
@@ -233,6 +235,27 @@ class AnalyticsStore:
                     app_version TEXT NOT NULL
                 );
 
+                -- 公告只保存开发者公开发布的内容。target_count 在发布瞬间固化，表示当时
+                -- 已真实打开过 App 的设备数；delivery/read 表分别记录实际收到与确认阅读。
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    published_at TEXT NOT NULL,
+                    target_count INTEGER NOT NULL DEFAULT 0,
+                    active INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS announcement_delivery (
+                    announcement_id INTEGER NOT NULL,
+                    install_hash TEXT NOT NULL,
+                    delivered_at TEXT NOT NULL,
+                    read_at TEXT,
+                    PRIMARY KEY (announcement_id, install_hash),
+                    FOREIGN KEY (announcement_id) REFERENCES announcements(id)
+                        ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_daily_active_day
                     ON daily_active(day);
                 CREATE INDEX IF NOT EXISTS idx_installations_version
@@ -241,6 +264,10 @@ class AnalyticsStore:
                     ON downloads(version_code);
                 CREATE INDEX IF NOT EXISTS idx_feedback_created
                     ON feedback(created_at DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_announcement_published
+                    ON announcements(published_at DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_announcement_delivery_read
+                    ON announcement_delivery(announcement_id, read_at);
                 """
             )
 
@@ -260,6 +287,94 @@ class AnalyticsStore:
                 (max(1, min(limit, 1000)),),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def create_announcement(self, title: str, content: str) -> int:
+        """发布公告并固化目标用户数；下载安装但从未启动的设备不在统计口径中。"""
+        with self._connect() as connection:
+            target_count = int(connection.execute(
+                "SELECT COUNT(*) FROM installations"
+            ).fetchone()[0])
+            cursor = connection.execute(
+                """
+                INSERT INTO announcements(title, content, published_at, target_count)
+                VALUES (?, ?, ?, ?)
+                """,
+                (title, content, iso_utc_now(), target_count),
+            )
+            return int(cursor.lastrowid)
+
+    def list_announcements(self, limit: int = 100) -> list[dict[str, Any]]:
+        """后台列表直接聚合投递与已读数，不加载匿名设备明细。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT a.id, a.title, a.content, a.published_at, a.target_count,
+                       a.active,
+                       COUNT(d.install_hash) AS delivered_count,
+                       COUNT(d.read_at) AS read_count
+                FROM announcements a
+                LEFT JOIN announcement_delivery d ON d.announcement_id = a.id
+                GROUP BY a.id
+                ORDER BY a.published_at DESC, a.id DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def deliver_announcements(
+        self, install_id: str, after_id: int, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """按匿名设备幂等记录投递；重复前台检查不会增加“已送达”人数。"""
+        install_hash = hash_identity(
+            self.telemetry_key, "announcement", install_id.lower()
+        )
+        now = iso_utc_now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, title, content, published_at
+                FROM announcements
+                WHERE active = 1 AND id > ?
+                ORDER BY id ASC LIMIT ?
+                """,
+                (max(0, after_id), max(1, min(limit, 50))),
+            ).fetchall()
+            connection.executemany(
+                """
+                INSERT INTO announcement_delivery(
+                    announcement_id, install_hash, delivered_at
+                ) VALUES (?, ?, ?)
+                ON CONFLICT(announcement_id, install_hash) DO NOTHING
+                """,
+                ((int(row["id"]), install_hash, now) for row in rows),
+            )
+        return [dict(row) for row in rows]
+
+    def mark_announcement_read(self, announcement_id: int, install_id: str) -> bool:
+        """“我知道了”回执幂等写入；若客户端漏过投递请求，也先补齐投递记录。"""
+        install_hash = hash_identity(
+            self.telemetry_key, "announcement", install_id.lower()
+        )
+        now = iso_utc_now()
+        with self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM announcements WHERE id = ? AND active = 1",
+                (announcement_id,),
+            ).fetchone()
+            if exists is None:
+                return False
+            connection.execute(
+                """
+                INSERT INTO announcement_delivery(
+                    announcement_id, install_hash, delivered_at, read_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(announcement_id, install_hash) DO UPDATE SET
+                    read_at = COALESCE(announcement_delivery.read_at, excluded.read_at)
+                """,
+                (announcement_id, install_hash, now, now),
+            )
+        return True
 
     def record_heartbeat(
         self,
@@ -725,6 +840,24 @@ class Handler(BaseHTTPRequestHandler):
                         HTTPStatus.INTERNAL_SERVER_ERROR,
                         error_page("反馈读取失败", str(exception)),
                     )
+        elif path == "/admin/announcements":
+            session = self._session_token()
+            if not session:
+                self._redirect("/admin/login")
+            else:
+                try:
+                    self._send_html(
+                        HTTPStatus.OK,
+                        announcements_page(
+                            self.service.store.list_announcements(),
+                            self.service.csrf_token(session),
+                        ),
+                    )
+                except sqlite3.Error as exception:
+                    self._send_html(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        error_page("公告读取失败", str(exception)),
+                    )
         elif path in {
             "/admin/collector",
             "/admin/collector/events",
@@ -795,12 +928,18 @@ class Handler(BaseHTTPRequestHandler):
             self._heartbeat()
         elif path == "/api/v1/feedback":
             self._feedback()
+        elif path == "/api/v1/announcements/sync":
+            self._sync_announcements()
+        elif path == "/api/v1/announcements/read":
+            self._read_announcement()
         elif path == "/admin/login":
             self._login()
         elif path == "/admin/logout":
             self._logout()
         elif path == "/admin/password":
             self._change_password()
+        elif path == "/admin/announcements":
+            self._publish_announcement()
         else:
             self._send_bytes(
                 HTTPStatus.NOT_FOUND, b"not found\n", "text/plain; charset=utf-8"
@@ -853,6 +992,74 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
         except sqlite3.Error:
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "temporarily unavailable"})
+
+    def _sync_announcements(self) -> None:
+        """返回尚未处理的公告；客户端离线或服务器异常时只影响这项附加能力。"""
+        try:
+            if not self.service.public_read_limiter.allow(self._client_ip()):
+                self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
+                return
+            payload = self._read_json()
+            install_id = str(payload.get("installId", "")).strip()
+            after_id = int(payload.get("afterId", 0))
+            if not IDENTITY_PATTERN.fullmatch(install_id) or after_id < 0:
+                raise ValueError("invalid announcement sync")
+            items = self.service.store.deliver_announcements(install_id, after_id)
+            self._send_json(HTTPStatus.OK, {
+                "announcements": items,
+                "serverTime": iso_utc_now(),
+            })
+        except (ValueError, TypeError, json.JSONDecodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
+        except sqlite3.Error:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "temporarily unavailable"})
+
+    def _read_announcement(self) -> None:
+        """只有用户明确点击“我知道了”后才写已读，不把通知送达等同于阅读。"""
+        try:
+            payload = self._read_json()
+            install_id = str(payload.get("installId", "")).strip()
+            announcement_id = int(payload.get("announcementId", 0))
+            if not IDENTITY_PATTERN.fullmatch(install_id) or announcement_id <= 0:
+                raise ValueError("invalid announcement receipt")
+            if not self.service.store.mark_announcement_read(announcement_id, install_id):
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "announcement not found"})
+                return
+            self._send_bytes(HTTPStatus.NO_CONTENT, b"", None)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
+        except sqlite3.Error:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "temporarily unavailable"})
+
+    def _publish_announcement(self) -> None:
+        """后台发布入口使用既有会话和 CSRF，公告正文不会进入 URL 或访问日志。"""
+        session = self._session_token()
+        if not session:
+            self._redirect("/admin/login")
+            return
+        try:
+            form = urllib.parse.parse_qs(
+                self._read_body().decode("utf-8"), keep_blank_values=True
+            )
+            csrf = form.get("csrf", [""])[0]
+            title = form.get("title", [""])[0].strip()
+            content = form.get("content", [""])[0].strip()
+            if not hmac.compare_digest(csrf, self.service.csrf_token(session)):
+                self._send_bytes(HTTPStatus.FORBIDDEN, b"forbidden\n", "text/plain")
+                return
+            if not title or len(title) > 80 or not content or len(content) > 4000:
+                raise ValueError("invalid announcement")
+            self.service.store.create_announcement(title, content)
+            self._redirect("/admin/announcements?published=1")
+        except (ValueError, UnicodeError, sqlite3.Error):
+            self._send_html(
+                HTTPStatus.BAD_REQUEST,
+                announcements_page(
+                    self.service.store.list_announcements(),
+                    self.service.csrf_token(session),
+                    error="标题需为 1–80 字，内容需为 1–4000 字。",
+                ),
+            )
 
     def _public_history(self) -> None:
         """公共只读接口：仅按精确 roomCode 返回最近 30 天采样，不需要或暴露凭据。"""
@@ -1324,6 +1531,7 @@ def dashboard_page(
             <p class="muted">匿名使用概览 · 中国标准时间</p>
           </div>
           <div class="header-actions">
+            <a class="secondary" href="/admin/announcements">公告管理</a>
             <a class="secondary" href="/admin/feedback">用户反馈</a>
             <a class="secondary" href="/admin/collector">云端采集</a>
             <a class="secondary" href="/admin/password">修改密码</a>
@@ -1438,6 +1646,67 @@ def feedback_page(items: list[dict[str, Any]]) -> str:
         </header>
         <main><section class="feedback-list">{body}</section></main>
         <footer>反馈仅包含署名、正文、App 版本和服务器接收时间</footer>
+        """,
+    )
+
+
+def announcements_page(
+    items: list[dict[str, Any]], csrf: str, error: str = ""
+) -> str:
+    """公告发布与统计页；目标、送达和已读三个口径明确分开。"""
+    cards = []
+    for item in items:
+        published = str(item.get("published_at", ""))
+        try:
+            published = dt.datetime.fromisoformat(published).astimezone(SHANGHAI).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        except ValueError:
+            pass
+        target = int(item.get("target_count", 0))
+        delivered = int(item.get("delivered_count", 0))
+        read = int(item.get("read_count", 0))
+        rate = (read / delivered * 100) if delivered else 0.0
+        cards.append(
+            '<article class="panel feedback-item">'
+            '<div class="panel-title"><div>'
+            f'<span class="eyebrow">公告 #{int(item.get("id", 0))} · {html.escape(published)}</span>'
+            f'<h2>{html.escape(str(item.get("title", "")))}</h2></div>'
+            f'<span class="pill">已读率 {rate:.1f}%</span></div>'
+            f'<p>{html.escape(str(item.get("content", ""))).replace(chr(10), "<br>")}</p>'
+            '<div class="metric-grid compact-metrics">'
+            f'{_metric("发布时目标用户", target, "当时已实际打开 App 的设备")}'
+            f'{_metric("已送达", delivered, "已从服务器取得该公告")}'
+            f'{_metric("已读", read, "明确点击“我知道了”")}'
+            '</div></article>'
+        )
+    history = "".join(cards) or '<section class="panel empty-state">尚未发布公告</section>'
+    error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    return page_shell(
+        "公告管理",
+        f"""
+        <header class="topbar">
+          <div><div class="eyebrow">ANNOUNCEMENTS</div><h1>公告管理</h1>
+          <p class="muted">轻量通知 · 匿名送达与已读统计</p></div>
+          <div class="header-actions"><a class="secondary" href="/admin/">返回概览</a></div>
+        </header>
+        <main>
+          <section class="panel">
+            <div class="panel-title"><div><span class="eyebrow">PUBLISH</span><h2>发布新公告</h2></div></div>
+            <p class="muted panel-help">发布后，App 前台启动会立即检查；后台以系统允许的低频任务检查，不会常驻或影响查电费。</p>
+            {error_html}
+            <form method="post" action="/admin/announcements">
+              <input type="hidden" name="csrf" value="{html.escape(csrf)}">
+              <label for="title">标题</label>
+              <input id="title" name="title" maxlength="80" required placeholder="例如：服务维护通知">
+              <label for="content">内容</label>
+              <textarea id="content" name="content" maxlength="4000" rows="6" required placeholder="请输入公告正文"></textarea>
+              <button type="submit">发布给所有用户</button>
+            </form>
+          </section>
+          <section class="feedback-list" style="margin-top:18px">{history}</section>
+        </main>
+        <footer>只保存匿名设备摘要；不收集房间、余额、别名或提醒配置</footer>
         """,
     )
 
@@ -2255,6 +2524,13 @@ def page_shell(title: str, content: str) -> str:
       border:1px solid var(--border); border-radius:10px; background:var(--surface);
       color:var(--text); font:inherit; }}
     .login-card button {{ width:100%; margin-top:14px; }}
+    main form > label {{ display:block; margin:16px 0 7px; font-weight:700; }}
+    main form > input:not([type=hidden]),main form > textarea {{ width:100%; min-height:46px;
+      padding:10px 12px; border:1px solid var(--border); border-radius:10px;
+      background:var(--surface); color:var(--text); font:inherit; }}
+    main form > textarea {{ resize:vertical; line-height:1.65; }}
+    main form > button {{ margin-top:16px; }}
+    .compact-metrics {{ grid-template-columns:repeat(3,1fr); margin-top:18px; }}
     .filters {{ display:flex; align-items:end; gap:10px; flex-wrap:wrap; }}
     .filters label {{ display:grid; gap:6px; color:var(--muted); font-size:12px; }}
     .filters input,.filters select {{ min-height:44px; padding:8px 10px; border:1px solid var(--border);

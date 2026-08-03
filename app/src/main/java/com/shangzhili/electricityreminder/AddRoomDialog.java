@@ -1,7 +1,8 @@
 package com.shangzhili.electricityreminder;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -65,7 +66,7 @@ public final class AddRoomDialog {
         aliasInput = content.findViewById(R.id.addRoomAliasInput);
         statusText = content.findViewById(R.id.addRoomStatusText);
 
-        dialog = new AlertDialog.Builder(activity)
+        dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("添加房间")
                 .setView(content)
                 .setNegativeButton("取消", null)
@@ -246,7 +247,7 @@ public final class AddRoomDialog {
         for (int index = 0; index < options.size(); index++) {
             names[index] = options.get(index).name;
         }
-        new AlertDialog.Builder(activity)
+        new MaterialAlertDialogBuilder(activity)
                 .setTitle(title)
                 .setItems(names, (ignored, index) -> optionListener.onSelected(options.get(index)))
                 .setNegativeButton("取消", null)

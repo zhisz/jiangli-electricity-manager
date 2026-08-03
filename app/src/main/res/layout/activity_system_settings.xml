@@ -1,286 +1,221 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:fillViewport="true"
+    android:background="@color/page_background">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="@dimen/page_horizontal">
+        android:paddingStart="@dimen/page_horizontal"
+        android:paddingEnd="@dimen/page_horizontal"
+        android:paddingBottom="32dp">
 
+        <!-- 顶部只保留返回与页面名称，避免旧页面的“设置与检查”产生双重任务感。 -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="64dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/settingsBackButton"
                 style="@style/Ui.Button.Text"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="0dp"
+                android:layout_height="48dp"
+                android:minWidth="48dp"
                 android:text="‹ 返回" />
-
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
+                android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="设置与检查"
+                android:text="设置"
                 android:textColor="@color/text_primary"
                 android:textSize="24sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- 主题只影响视觉资源；房间配置、闹钟和历史数据完全独立。 -->
-        <LinearLayout
+        <!-- 第一张卡只回答“后台提醒能否正常工作”；复杂权限项默认不占首屏。 -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_3"
-            android:background="@drawable/room_card_background"
-            android:orientation="vertical"
-            android:padding="@dimen/card_padding">
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/border"
+            app:strokeWidth="1dp">
 
-            <TextView
-                style="@style/Ui.Text.SectionTitle"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="外观主题" />
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
 
-            <TextView
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_1"
-                android:text="主题色与显示模式可自由组合，选择后立即应用。" />
-
-            <TextView
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:text="主题色"
-                android:textStyle="bold" />
-
-            <RadioGroup
-                android:id="@+id/themeModeGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:background="@drawable/segment_container_background"
-                android:orientation="horizontal">
-
-                <RadioButton
-                    android:id="@+id/themeBlueRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
+                <TextView
+                    style="@style/Ui.Text.SectionTitle"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="学院蓝" />
+                    android:text="提醒环境" />
 
-                <RadioButton
-                    android:id="@+id/themeJadeRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/overallStatusText"
+                    style="@style/Ui.Text.Body"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="清新绿" />
+                    android:layout_marginTop="8dp"
+                    android:text="正在检查系统设置……" />
 
-                <RadioButton
-                    android:id="@+id/themePurpleRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/systemDetailsToggle"
+                    style="@style/Ui.Button.Secondary"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="静雅紫" />
-            </RadioGroup>
+                    android:layout_marginTop="12dp"
+                    android:text="查看系统设置" />
 
-            <TextView
-                style="@style/Ui.Text.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_3"
-                android:text="显示模式"
-                android:textStyle="bold" />
-
-            <!-- 显示模式和主题色使用两个独立 RadioGroup，用户可任意组合。 -->
-            <RadioGroup
-                android:id="@+id/appearanceModeGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_1"
-                android:background="@drawable/segment_container_background"
-                android:orientation="horizontal">
-
-                <RadioButton
-                    android:id="@+id/appearanceSystemRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
+                <!-- 展开时仍保留全部旧功能和状态，收起不会改变任何设置。 -->
+                <LinearLayout
+                    android:id="@+id/advancedSystemContent"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="跟随系统" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
-                <RadioButton
-                    android:id="@+id/appearanceLightRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="浅色" />
+                    <TextView android:id="@+id/notificationStatusText"
+                        style="@style/Ui.Text.Body" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="18dp"
+                        android:text="通知权限与通知渠道" android:textStyle="bold" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/openNotificationSettingsButton" style="@style/Ui.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:text="设置通知权限" />
 
-                <RadioButton
-                    android:id="@+id/appearanceDarkRadio"
-                    style="@style/Ui.SegmentButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="深色" />
-            </RadioGroup>
-        </LinearLayout>
+                    <TextView android:id="@+id/exactAlarmStatusText"
+                        style="@style/Ui.Text.Body" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                        android:text="精确闹钟权限" android:textStyle="bold" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/openExactAlarmSettingsButton" style="@style/Ui.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:text="设置精确闹钟" />
 
-        <TextView
-            android:id="@+id/overallStatusText"
+                    <TextView android:id="@+id/batteryStatusText"
+                        style="@style/Ui.Text.Body" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                        android:text="忽略系统电池优化" android:textStyle="bold" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/openBatterySettingsButton" style="@style/Ui.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:text="设置电池策略" />
+
+                    <TextView android:id="@+id/autoStartStatusText"
+                        style="@style/Ui.Text.Body" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                        android:text="厂商自启动" android:textStyle="bold" />
+                    <TextView style="@style/Ui.Text.Body" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                        android:text="部分手机无法自动检测自启动状态，需要在系统中开启后手动确认。" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/openAutoStartSettingsButton" style="@style/Ui.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="打开本 App 系统设置" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/autoStartConfirmButton" style="@style/Ui.Button.Text"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:text="我已开启自启动" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 外观优先给出最常用的深浅模式；品牌色属于低频个性化，默认收起。 -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:background="@drawable/status_background"
-            android:padding="@dimen/card_padding"
-            android:text="正在检查系统设置……"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:layout_marginTop="16dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/border"
+            app:strokeWidth="1dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="@dimen/card_padding">
+                <TextView style="@style/Ui.Text.SectionTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="外观" />
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/appearanceModeGroup"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp" app:selectionRequired="true"
+                    app:singleSelection="true">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/appearanceSystemRadio" style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:text="跟随系统" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/appearanceLightRadio" style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:text="浅色" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/appearanceDarkRadio" style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                        android:text="深色" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
 
-        <TextView
-            android:id="@+id/notificationStatusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="通知权限与通知渠道"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/themeDetailsToggle" style="@style/Ui.Button.Text"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" android:text="更改主题颜色" />
+                <LinearLayout android:id="@+id/themeDetailsContent"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:visibility="gone">
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/themeModeGroup" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                        app:selectionRequired="true" app:singleSelection="true">
+                        <com.google.android.material.button.MaterialButton android:id="@+id/themeBlueRadio"
+                            style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
+                            android:layout_height="48dp" android:layout_weight="1" android:text="学院蓝" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/themeJadeRadio"
+                            style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
+                            android:layout_height="48dp" android:layout_weight="1" android:text="清新绿" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/themePurpleRadio"
+                            style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp"
+                            android:layout_height="48dp" android:layout_weight="1" android:text="静雅紫" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <Button
-            android:id="@+id/openNotificationSettingsButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="设置通知权限" />
-
-        <TextView
-            android:id="@+id/exactAlarmStatusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="精确闹钟权限"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/openExactAlarmSettingsButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="设置精确闹钟" />
-
-        <TextView
-            android:id="@+id/batteryStatusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="忽略系统电池优化"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/openBatterySettingsButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="设置电池策略" />
-
-        <TextView
-            android:id="@+id/autoStartStatusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="厂商自启动"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="vivo、OPPO、小米等系统没有统一的自启动检测接口。请在系统应用设置中允许本 App 自启动，然后手动确认。"
-            android:textColor="@color/text_secondary"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/openAutoStartSettingsButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="打开本 App 系统设置" />
-
-        <Button
-            android:id="@+id/autoStartConfirmButton"
-            style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="我已在系统中开启自启动" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="这些设置只需配置一次。系统升级、清理权限或重新安装后，可从首页右上角重新检查。"
-            android:textColor="@color/text_secondary"
-            android:textSize="14sp" />
-
-        <!-- 基地只保留状态和品牌内容；低频工具统一归入设置页，避免两个入口重复。 -->
-        <TextView
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="20dp" android:text="应用与数据"
-            android:textSize="17sp" android:textStyle="bold" />
-        <Button android:id="@+id/manualUpdateButton" style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" android:text="检查应用更新" />
-        <Button android:id="@+id/dataStorageButton" style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="6dp" android:text="数据与存储" />
-        <Button android:id="@+id/usageHelpButton" style="@style/Ui.Button.Secondary"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="6dp" android:text="使用说明" />
+            android:layout_marginTop="16dp" app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="16dp" app:cardElevation="0dp"
+            app:strokeColor="@color/border" app:strokeWidth="1dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="@dimen/card_padding">
+                <TextView style="@style/Ui.Text.SectionTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="常用工具" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/manualUpdateButton"
+                    style="@style/Ui.Button.Secondary" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="检查应用更新" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/dataStorageButton"
+                    style="@style/Ui.Button.Secondary" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="数据与存储" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/usageHelpButton"
+                    style="@style/Ui.Button.Secondary" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="使用说明" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <!--
-          署名和反馈入口放在页面最底部，保持低视觉权重，不干扰上方系统设置任务。
-          邮箱仍满足 48dp 触控高度，方便用户直接唤起邮件应用。
-        -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_6"
-            android:gravity="center"
-            android:text="@string/developer_signature"
-            android:textColor="@color/text_tertiary"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/feedbackEmailButton"
-            style="@style/Ui.Button.Text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_1"
-            android:layout_marginBottom="28dp"
-            android:text="@string/feedback_email"
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="24dp" android:gravity="center" android:text="@string/developer_signature"
+            android:textColor="@color/text_tertiary" android:textSize="13sp" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/feedbackEmailButton"
+            style="@style/Ui.Button.Text" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/feedback_email"
             android:textColor="@color/text_secondary" />
-
     </LinearLayout>
 </ScrollView>

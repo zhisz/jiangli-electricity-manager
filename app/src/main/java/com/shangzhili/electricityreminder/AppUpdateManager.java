@@ -1,7 +1,8 @@
 package com.shangzhili.electricityreminder;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -63,6 +64,14 @@ public final class AppUpdateManager {
     private boolean skipResumeAfterOptionalInstaller;
     private AlertDialog blockingDialog;
     private AlertDialog readyDialog;
+    private AlertDialog updateDialog;
+
+    /** 供应用级生命周期协调器错开公告弹窗，避免两个重要消息同时覆盖。 */
+    boolean isDialogShowing() {
+        return (updateDialog != null && updateDialog.isShowing())
+                || (blockingDialog != null && blockingDialog.isShowing())
+                || (readyDialog != null && readyDialog.isShowing());
+    }
 
     private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
         @Override
@@ -177,6 +186,10 @@ public final class AppUpdateManager {
     }
 
     public void destroy() {
+        if (updateDialog != null) {
+            updateDialog.dismiss();
+            updateDialog = null;
+        }
         if (receiverRegistered) {
             try {
                 activity.unregisterReceiver(downloadReceiver);
@@ -196,7 +209,7 @@ public final class AppUpdateManager {
         String message = (info.releaseNotes.isEmpty() ? "本次包含功能改进和问题修复。"
                 : info.releaseNotes) + policy;
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(activity)
                 .setTitle("发现新版本 " + info.versionName)
                 .setMessage(message)
                 .setPositiveButton("立即更新", (dialog, which) -> beginDownload(info, mandatory));
@@ -207,10 +220,11 @@ public final class AppUpdateManager {
                     .setNeutralButton("跳过此版本", (dialog, which) -> preferences.edit()
                             .putInt(KEY_SKIPPED_VERSION, info.versionCode).apply());
         }
-        AlertDialog dialog = builder.create();
-        dialog.setCancelable(!mandatory);
-        dialog.setCanceledOnTouchOutside(false);
-        dialog.show();
+        updateDialog = builder.create();
+        updateDialog.setCancelable(!mandatory);
+        updateDialog.setCanceledOnTouchOutside(false);
+        updateDialog.setOnDismissListener(dialog -> updateDialog = null);
+        updateDialog.show();
     }
 
     private void beginDownload(UpdateInfo info, boolean mandatory) {
@@ -336,7 +350,7 @@ public final class AppUpdateManager {
             return;
         }
         boolean mandatory = isPendingMandatory();
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(activity)
                 .setTitle("更新已下载")
                 .setMessage("版本 " + pendingVersionName() + " 已完成下载和安全校验。")
                 .setPositiveButton("安装更新", (dialog, which) -> requestInstall(uri, mandatory));
@@ -373,7 +387,7 @@ public final class AppUpdateManager {
     }
 
     private void showInstallPermissionDialog(boolean mandatory) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(activity)
                 .setTitle("允许安装应用更新")
                 .setMessage("Android 需要先允许江理电小侠安装此来源的更新。授权后会再次提示安装。")
                 .setPositiveButton("前往授权", (dialog, which) -> {
@@ -398,7 +412,7 @@ public final class AppUpdateManager {
 
     private void showDownloadingDialog(String versionName) {
         if (!activityUsable() || (blockingDialog != null && blockingDialog.isShowing())) return;
-        blockingDialog = new AlertDialog.Builder(activity)
+        blockingDialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("正在下载必要更新")
                 .setMessage("版本 " + versionName + " 正在后台下载，请稍候。")
                 .setNegativeButton("退出应用", (dialog, which) -> exitApplication())
@@ -424,7 +438,7 @@ public final class AppUpdateManager {
             toast(message);
             return;
         }
-        AlertDialog dialog = new AlertDialog.Builder(activity)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("必要更新未完成")
                 .setMessage(message)
                 .setPositiveButton("重新下载", (ignored, which) -> beginDownload(info, true))
@@ -436,7 +450,7 @@ public final class AppUpdateManager {
     }
 
     private void showInstallError(String message, boolean mandatory) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(activity)
                 .setTitle("无法安装更新")
                 .setMessage(message);
         if (mandatory) {

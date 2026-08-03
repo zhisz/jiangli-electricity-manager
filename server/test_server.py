@@ -180,6 +180,42 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(2, stats["latest_download_unique"])
         self.assertEqual(3, stats["latest_download_requests"])
 
+    def test_announcement_delivery_and_read_are_idempotent(self):
+        first_device = "a" * 64
+        second_device = "b" * 64
+        self.store.record_heartbeat(first_device, 50, "2.0.0")
+        self.store.record_heartbeat(second_device, 50, "2.0.0")
+        announcement_id = self.store.create_announcement("停机通知", "今晚服务维护")
+
+        first = self.store.deliver_announcements(first_device, 0)
+        self.store.deliver_announcements(first_device, 0)
+        self.assertEqual(announcement_id, first[0]["id"])
+        self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
+        self.assertTrue(self.store.mark_announcement_read(announcement_id, first_device))
+
+        item = self.store.list_announcements()[0]
+        self.assertEqual(2, item["target_count"])
+        self.assertEqual(1, item["delivered_count"])
+        self.assertEqual(1, item["read_count"])
+
+    def test_announcement_after_id_and_unknown_read(self):
+        device = "c" * 64
+        first_id = self.store.create_announcement("第一条", "内容一")
+        second_id = self.store.create_announcement("第二条", "内容二")
+        items = self.store.deliver_announcements(device, first_id)
+        self.assertEqual([second_id], [item["id"] for item in items])
+        self.assertFalse(self.store.mark_announcement_read(999_999, device))
+
+    def test_announcement_admin_page_escapes_user_visible_content(self):
+        announcement_id = self.store.create_announcement("<标题>", "正文 <script>")
+        page = app_server.announcements_page(
+            self.store.list_announcements(), "safe-csrf"
+        )
+        self.assertIn(f"公告 #{announcement_id}", page)
+        self.assertIn("&lt;标题&gt;", page)
+        self.assertIn("正文 &lt;script&gt;", page)
+        self.assertNotIn("正文 <script>", page)
+
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):
@@ -289,6 +325,14 @@ class ServiceTests(unittest.TestCase):
             ["0.17.0", "0.16.1", "0.16.0"],
             [item["version"] for item in releases],
         )
+
+    def test_formal_jiangli_apk_is_in_release_history(self):
+        formal = self.settings.download_dir / "jiangli-electricity-2.1.0.apk"
+        formal.write_bytes(b"formal apk")
+        service = app_server.ElecService(self.settings)
+        releases = service.available_releases()
+        self.assertEqual("2.1.0", releases[0]["version"])
+        self.assertEqual(formal.name, releases[0]["filename"])
 
 
 if __name__ == "__main__":
