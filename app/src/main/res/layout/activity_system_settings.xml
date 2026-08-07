@@ -223,5 +223,10 @@
             style="@style/Ui.Button.Text" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:text="@string/feedback_email"
             android:textColor="@color/text_secondary" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/filingNumberButton"
+            style="@style/Ui.Button.Text" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/app_filing_number"
+            android:contentDescription="打开工信部备案系统查询 APP 备案信息"
+            android:textColor="@color/text_secondary" />
     </LinearLayout>
 </ScrollView>

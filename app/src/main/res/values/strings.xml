@@ -7,6 +7,9 @@
     <string name="feedback_email">反馈邮箱：3357627169@qq.com</string>
     <string name="feedback_email_address">3357627169@qq.com</string>
     <string name="feedback_email_subject">江理电小侠反馈</string>
+    <!-- APP 备案信息必须在显著位置展示，并可跳转备案系统供用户查询核对。 -->
+    <string name="app_filing_number">APP备案号：赣ICP备2026010766号-2A</string>
+    <string name="app_filing_query_url">https://beian.miit.gov.cn/</string>
     <string name="online_recharge_button">电费充值</string>
     <string name="recharge_amount_hint">输入充值金额</string>
     <string name="recharge_amount_range_hint">输入金额（%1$s–%2$s）</string>

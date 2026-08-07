@@ -53,6 +53,7 @@ final class HeroBaseController {
                 activity.startActivity(new Intent(activity, SystemSettingsActivity.class)));
         root.findViewById(R.id.baseAppearanceButton).setOnClickListener(view -> toggleAppearance());
         root.findViewById(R.id.baseFeedbackButton).setOnClickListener(view -> showFeedbackDialog());
+        root.findViewById(R.id.baseFilingNumberText).setOnClickListener(view -> openFilingQuery());
         root.findViewById(R.id.baseGithubButton).setOnClickListener(view -> activity.startActivity(
                 new Intent(Intent.ACTION_VIEW,
                         Uri.parse("https://github.com/zhisz/jiangli-electricity-manager"))));
@@ -63,6 +64,18 @@ final class HeroBaseController {
         ((TextView) root.findViewById(R.id.baseAboutVersionText)).setText(
                 "当前版本　" + BuildConfig.VERSION_NAME);
         refreshAppearanceButton();
+    }
+
+    /** 备案编号旁直接提供工信部查询入口，便于用户核对备案主体和应用信息。 */
+    private void openFilingQuery() {
+        try {
+            activity.startActivity(new Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse(activity.getString(R.string.app_filing_query_url))
+            ));
+        } catch (RuntimeException exception) {
+            Toast.makeText(activity, "暂时无法打开备案查询页面", Toast.LENGTH_SHORT).show();
+        }
     }
 
     void onVisible() {

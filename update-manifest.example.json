@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "versionCode": 54,
-  "versionName": "2.3.0",
+  "versionCode": 55,
+  "versionName": "2.3.1",
   "minSupportedVersionCode": 54,
-  "forceUpdate": true,
-  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.3.0.apk",
+  "forceUpdate": false,
+  "apkUrl": "https://your-domain.example/downloads/jiangli-electricity-2.3.1.apk",
   "sha256": "请替换为APK文件的64位SHA-256小写值",
-  "releaseNotes": "修复系统下载任务无进度时更新页面长期卡住的问题，新增实时下载进度、状态轮询和重新下载入口；开发者后台新增可持久化的云端采集启停开关。"
+  "releaseNotes": "在电小侠基地和设置页显著展示 APP 备案号，并提供工信部备案系统查询入口；产品介绍页同步展示备案信息。"
 }
