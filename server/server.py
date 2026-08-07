@@ -289,6 +289,22 @@ class AnalyticsStore:
                 connection.execute(
                     "ALTER TABLE announcements ADD COLUMN withdrawn_at TEXT"
                 )
+            # 2.3.1 公告时效迁移：旧公告的 starts_at 保持 NULL，查询时回退到
+            # published_at；expires_at 为 NULL 代表长期有效，因此无需重写旧数据。
+            if "starts_at" not in announcement_columns:
+                connection.execute(
+                    "ALTER TABLE announcements ADD COLUMN starts_at TEXT"
+                )
+            if "expires_at" not in announcement_columns:
+                connection.execute(
+                    "ALTER TABLE announcements ADD COLUMN expires_at TEXT"
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_announcement_delivery_window
+                ON announcements(active, withdrawn, starts_at, expires_at, id)
+                """
+            )
 
     def record_feedback(self, signature: str, content: str, app_version: str) -> int:
         """反馈与匿名统计共用轻量数据库，但不接收设备、房间或提醒配置。"""
@@ -307,18 +323,26 @@ class AnalyticsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def create_announcement(self, title: str, content: str) -> int:
-        """发布公告并固化目标用户数；下载安装但从未启动的设备不在统计口径中。"""
+    def create_announcement(
+        self,
+        title: str,
+        content: str,
+        starts_at: str | None = None,
+        expires_at: str | None = None,
+    ) -> int:
+        """创建定时公告并固化目标用户数；空失效时间表示长期有效。"""
         with self._connect() as connection:
             target_count = int(connection.execute(
                 "SELECT COUNT(*) FROM installations"
             ).fetchone()[0])
+            published_at = iso_utc_now()
             cursor = connection.execute(
                 """
-                INSERT INTO announcements(title, content, published_at, target_count)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO announcements(
+                    title, content, published_at, target_count, starts_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (title, content, iso_utc_now(), target_count),
+                (title, content, published_at, target_count, starts_at, expires_at),
             )
             return int(cursor.lastrowid)
 
@@ -329,6 +353,7 @@ class AnalyticsStore:
                 """
                 SELECT a.id, a.title, a.content, a.published_at, a.target_count,
                        a.active, a.withdrawn, a.closed_at, a.withdrawn_at,
+                       a.starts_at, a.expires_at,
                        COUNT(d.install_hash) AS delivered_count,
                        COUNT(d.read_at) AS read_count
                 FROM announcements a
@@ -344,7 +369,7 @@ class AnalyticsStore:
     def deliver_announcements(
         self, install_id: str, after_id: int, limit: int = 20
     ) -> dict[str, Any]:
-        """返回该设备尚未送达的有效公告，以及已送达但后来被撤回的公告 ID。"""
+        """返回当前时段内尚未送达的公告；过期公告会沿用撤回列表清理客户端通知。"""
         install_hash = hash_identity(
             self.telemetry_key, "announcement", install_id.lower()
         )
@@ -357,10 +382,12 @@ class AnalyticsStore:
                 LEFT JOIN announcement_delivery d
                   ON d.announcement_id = a.id AND d.install_hash = ?
                 WHERE a.active = 1 AND a.withdrawn = 0
+                  AND COALESCE(a.starts_at, a.published_at) <= ?
+                  AND (a.expires_at IS NULL OR a.expires_at > ?)
                   AND d.install_hash IS NULL
                 ORDER BY a.id ASC LIMIT ?
                 """,
-                (install_hash, max(1, min(limit, 50))),
+                (install_hash, now, now, max(1, min(limit, 50))),
             ).fetchall()
             connection.executemany(
                 """
@@ -375,10 +402,11 @@ class AnalyticsStore:
                 """
                 SELECT a.id FROM announcements a
                 JOIN announcement_delivery d ON d.announcement_id = a.id
-                WHERE d.install_hash = ? AND a.withdrawn = 1
+                WHERE d.install_hash = ?
+                  AND (a.withdrawn = 1 OR (a.expires_at IS NOT NULL AND a.expires_at <= ?))
                 ORDER BY a.id
                 """,
-                (install_hash,),
+                (install_hash, now),
             ).fetchall()
         return {
             "announcements": [dict(row) for row in rows],
@@ -1134,12 +1162,19 @@ class Handler(BaseHTTPRequestHandler):
             csrf = form.get("csrf", [""])[0]
             title = form.get("title", [""])[0].strip()
             content = form.get("content", [""])[0].strip()
+            starts_local = form.get("startsAt", [""])[0].strip()
+            expires_local = form.get("expiresAt", [""])[0].strip()
             if not hmac.compare_digest(csrf, self.service.csrf_token(session)):
                 self._send_bytes(HTTPStatus.FORBIDDEN, b"forbidden\n", "text/plain")
                 return
             if not title or len(title) > 80 or not content or len(content) > 4000:
                 raise ValueError("invalid announcement")
-            self.service.store.create_announcement(title, content)
+            starts_at = _announcement_time_from_local(starts_local) if starts_local else None
+            expires_at = _announcement_time_from_local(expires_local) if expires_local else None
+            effective_start = dt.datetime.fromisoformat(starts_at) if starts_at else utc_now()
+            if expires_at and dt.datetime.fromisoformat(expires_at) <= effective_start:
+                raise ValueError("invalid announcement window")
+            self.service.store.create_announcement(title, content, starts_at, expires_at)
             self._redirect("/admin/announcements?published=1")
         except (ValueError, UnicodeError, sqlite3.Error):
             self._send_html(
@@ -1147,7 +1182,13 @@ class Handler(BaseHTTPRequestHandler):
                 announcements_page(
                     self.service.store.list_announcements(),
                     self.service.csrf_token(session),
-                    error="标题需为 1–80 字，内容需为 1–4000 字。",
+                    error="请检查标题、内容和推送时间；结束时间必须晚于开始时间。",
+                    draft={
+                        "title": locals().get("title", ""),
+                        "content": locals().get("content", ""),
+                        "startsAt": locals().get("starts_local", ""),
+                        "expiresAt": locals().get("expires_local", ""),
+                    },
                 ),
             )
 
@@ -1766,7 +1807,8 @@ def feedback_page(items: list[dict[str, Any]]) -> str:
 
 
 def announcements_page(
-    items: list[dict[str, Any]], csrf: str, error: str = ""
+    items: list[dict[str, Any]], csrf: str, error: str = "",
+    draft: dict[str, str] | None = None,
 ) -> str:
     """公告发布与统计页；目标、送达和已读三个口径明确分开。"""
     cards = []
@@ -1784,17 +1826,33 @@ def announcements_page(
         rate = (read / delivered * 100) if delivered else 0.0
         withdrawn = bool(item.get("withdrawn", 0))
         active = bool(item.get("active", 0)) and not withdrawn
-        state_label = "已撤回" if withdrawn else "推送中" if active else "已关闭"
+        starts_at = _parse_stored_time(item.get("starts_at") or item.get("published_at"))
+        expires_at = _parse_stored_time(item.get("expires_at"))
+        now = utc_now()
+        if withdrawn:
+            state_label = "已撤回"
+        elif not active:
+            state_label = "已关闭"
+        elif starts_at and starts_at > now:
+            state_label = "待生效"
+        elif expires_at and expires_at <= now:
+            state_label = "已过期"
+        else:
+            state_label = "推送中"
         if withdrawn:
             actions = ""
         else:
             toggle_action = "close" if active else "reopen"
             toggle_label = "关闭推送" if active else "重新开启"
+            toggle_button = "" if state_label == "已过期" else (
+                f'<button class="secondary compact-button" name="action" '
+                f'value="{toggle_action}" type="submit">{toggle_label}</button>'
+            )
             actions = f"""
               <form class="inline-actions" method="post" action="/admin/announcements/action">
                 <input type="hidden" name="csrf" value="{html.escape(csrf)}">
                 <input type="hidden" name="announcementId" value="{int(item.get('id', 0))}">
-                <button class="secondary compact-button" name="action" value="{toggle_action}" type="submit">{toggle_label}</button>
+                {toggle_button}
                 <button class="danger-button compact-button" name="action" value="withdraw" type="submit">撤回公告</button>
               </form>
             """
@@ -1805,6 +1863,8 @@ def announcements_page(
             f'<h2>{html.escape(str(item.get("title", "")))}</h2></div>'
             f'<div><span class="pill">{state_label}</span> <span class="pill">已读率 {rate:.1f}%</span></div></div>'
             f'<p>{html.escape(str(item.get("content", ""))).replace(chr(10), "<br>")}</p>'
+            f'<div class="announcement-window">推送时段（北京时间）：'
+            f'{html.escape(_announcement_window_text(starts_at, expires_at))}</div>'
             '<div class="metric-grid compact-metrics">'
             f'{_metric("发布时目标用户", target, "当时已实际打开 App 的设备")}'
             f'{_metric("已送达", delivered, "已从服务器取得该公告")}'
@@ -1813,6 +1873,7 @@ def announcements_page(
         )
     history = "".join(cards) or '<section class="panel empty-state">尚未发布公告</section>'
     error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    draft = draft or {}
     return page_shell(
         "公告管理",
         f"""
@@ -1829,9 +1890,22 @@ def announcements_page(
             <form method="post" action="/admin/announcements">
               <input type="hidden" name="csrf" value="{html.escape(csrf)}">
               <label for="title">标题</label>
-              <input id="title" name="title" maxlength="80" required placeholder="例如：服务维护通知">
+              <input id="title" name="title" maxlength="80" required placeholder="例如：服务维护通知"
+                value="{html.escape(draft.get('title', ''))}">
               <label for="content">内容</label>
-              <textarea id="content" name="content" maxlength="4000" rows="6" required placeholder="请输入公告正文"></textarea>
+              <textarea id="content" name="content" maxlength="4000" rows="6" required placeholder="请输入公告正文">{html.escape(draft.get('content', ''))}</textarea>
+              <div class="announcement-window-grid">
+                <label for="startsAt">开始推送
+                  <input id="startsAt" name="startsAt" type="datetime-local"
+                    value="{html.escape(draft.get('startsAt', ''))}">
+                  <small>留空表示发布后立即生效</small>
+                </label>
+                <label for="expiresAt">停止推送
+                  <input id="expiresAt" name="expiresAt" type="datetime-local"
+                    value="{html.escape(draft.get('expiresAt', ''))}">
+                  <small>留空表示长期有效</small>
+                </label>
+              </div>
               <button type="submit">发布给所有用户</button>
             </form>
           </section>
@@ -1840,6 +1914,37 @@ def announcements_page(
         <footer>只保存匿名设备摘要；不收集房间、余额、别名或提醒配置</footer>
         """,
     )
+
+
+def _announcement_time_from_local(value: str) -> str:
+    """将后台 datetime-local 明确解释为北京时间，再统一存成 UTC ISO 时间。"""
+
+    local = dt.datetime.strptime(value, "%Y-%m-%dT%H:%M").replace(tzinfo=SHANGHAI)
+    return local.astimezone(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def _parse_stored_time(value: Any) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(str(value))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return None
+
+
+def _announcement_window_text(
+    starts_at: dt.datetime | None, expires_at: dt.datetime | None
+) -> str:
+    start_text = (
+        starts_at.astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M")
+        if starts_at else "立即"
+    )
+    end_text = (
+        expires_at.astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M")
+        if expires_at else "长期有效"
+    )
+    return f"{start_text} — {end_text}"
 
 
 def _metric(label: str, value: Any, detail: str) -> str:
@@ -2655,6 +2760,15 @@ def page_shell(title: str, content: str) -> str:
     .notes p {{ color:var(--muted); line-height:1.7; }}
     .feedback-list {{ display:grid; gap:12px; }}
     .feedback-item p {{ margin:0; line-height:1.75; overflow-wrap:anywhere; white-space:normal; }}
+    .announcement-window {{ margin-top:12px; padding:10px 12px; border-radius:10px;
+      background:var(--soft); color:var(--muted); font-size:13px; }}
+    .announcement-window-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:12px;
+      margin-top:16px; }}
+    .announcement-window-grid label {{ display:grid; gap:7px; font-weight:700; }}
+    .announcement-window-grid input {{ width:100%; min-height:46px; padding:10px 12px;
+      border:1px solid var(--border); border-radius:10px; background:var(--surface);
+      color:var(--text); font:inherit; color-scheme:light dark; }}
+    .announcement-window-grid small {{ color:var(--muted); font-weight:400; }}
     .panel-help {{ margin:-8px 0 12px; line-height:1.6; }}
     table {{ width:100%; border-collapse:collapse; }}
     .table-wrap {{ width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }}
@@ -2819,6 +2933,7 @@ def page_shell(title: str, content: str) -> str:
       .collector-topbar > div:first-child {{ display:block; }}
       .collector-topbar p {{ margin-top:5px; white-space:normal; }}
       .metric-grid {{ grid-template-columns:repeat(2,1fr); }}
+      .announcement-window-grid {{ grid-template-columns:1fr; }}
       dl {{ grid-template-columns:1fr; gap:4px; }} dd {{ margin-bottom:10px; }}
       .task-card,.events-panel,.distribution-panel {{ padding:18px; }}
       .coverage-summary,.failure-summary,.section-heading {{ align-items:flex-start; flex-direction:column; }}

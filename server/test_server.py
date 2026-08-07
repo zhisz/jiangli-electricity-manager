@@ -213,6 +213,48 @@ class AnalyticsStoreTests(unittest.TestCase):
         )
         self.assertFalse(self.store.mark_announcement_read(999_999, device))
 
+    def test_announcement_only_delivers_inside_configured_window(self):
+        device = "e" * 64
+        with mock.patch(
+            "server.server.iso_utc_now", return_value="2026-08-07T00:00:00+00:00"
+        ):
+            announcement_id = self.store.create_announcement(
+                "限时公告", "仅在上午推送",
+                "2026-08-07T01:00:00+00:00",
+                "2026-08-07T03:00:00+00:00",
+            )
+
+        with mock.patch(
+            "server.server.iso_utc_now", return_value="2026-08-07T00:30:00+00:00"
+        ):
+            self.assertEqual([], self.store.deliver_announcements(device, 0)["announcements"])
+
+        with mock.patch(
+            "server.server.iso_utc_now", return_value="2026-08-07T02:00:00+00:00"
+        ):
+            delivered = self.store.deliver_announcements(device, 0)
+            self.assertEqual(announcement_id, delivered["announcements"][0]["id"])
+
+        # 过期后不再向新设备投递；已送达设备会复用现有撤回列表，让旧版客户端
+        # 也能清除系统通知和本地待读弹窗，无需升级协议。
+        with mock.patch(
+            "server.server.iso_utc_now", return_value="2026-08-07T03:00:00+00:00"
+        ):
+            expired = self.store.deliver_announcements(device, 0)
+            self.assertEqual([], expired["announcements"])
+            self.assertEqual([announcement_id], expired["withdrawn_ids"])
+            self.assertEqual(
+                [], self.store.deliver_announcements("f" * 64, 0)["announcements"]
+            )
+
+    def test_announcement_local_time_is_interpreted_as_shanghai(self):
+        self.assertEqual(
+            "2026-08-07T04:31:00+00:00",
+            app_server._announcement_time_from_local("2026-08-07T12:31"),
+        )
+        with self.assertRaises(ValueError):
+            app_server._announcement_time_from_local("2026/08/07 12:31")
+
     def test_close_reopen_and_withdraw_have_distinct_behavior(self):
         device = "d" * 64
         announcement_id = self.store.create_announcement("测试公告", "状态测试")
@@ -238,7 +280,10 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(0, item["active"])
 
     def test_announcement_admin_page_escapes_user_visible_content(self):
-        announcement_id = self.store.create_announcement("<标题>", "正文 <script>")
+        announcement_id = self.store.create_announcement(
+            "<标题>", "正文 <script>",
+            "2026-08-07T04:00:00+00:00", "2026-08-07T06:00:00+00:00",
+        )
         page = app_server.announcements_page(
             self.store.list_announcements(), "safe-csrf"
         )
@@ -246,6 +291,9 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertIn("&lt;标题&gt;", page)
         self.assertIn("正文 &lt;script&gt;", page)
         self.assertNotIn("正文 <script>", page)
+        self.assertIn('name="startsAt" type="datetime-local"', page)
+        self.assertIn('name="expiresAt" type="datetime-local"', page)
+        self.assertIn("2026-08-07 12:00 — 2026-08-07 14:00", page)
 
 
 class ServiceTests(unittest.TestCase):
