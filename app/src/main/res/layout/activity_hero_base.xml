@@ -127,6 +127,14 @@
                 <TextView android:id="@+id/baseAboutVersionText" style="@style/BaseAboutText" />
                 <TextView style="@style/BaseAboutText" android:text="开发者　zhiSZ" />
                 <TextView style="@style/BaseAboutText" android:text="联系我　3357627169@qq.com" />
+                <TextView
+                    android:id="@+id/baseFilingNumberText"
+                    style="@style/BaseAboutText"
+                    android:clickable="true"
+                    android:contentDescription="打开工信部备案系统查询 APP 备案信息"
+                    android:focusable="true"
+                    android:text="@string/app_filing_number"
+                    android:textColor="@color/base_lightning" />
             </LinearLayout>
 
             <Button android:id="@+id/baseFeedbackButton" style="@style/BaseToolButton" android:text="意见反馈（需署名）　›" />

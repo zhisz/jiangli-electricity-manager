@@ -72,6 +72,8 @@ public final class SystemSettingsActivity extends Activity {
                 .setOnClickListener(view -> openAutoStartSettings());
         findViewById(R.id.feedbackEmailButton)
                 .setOnClickListener(view -> openFeedbackEmail());
+        findViewById(R.id.filingNumberButton)
+                .setOnClickListener(view -> openFilingQuery());
         findViewById(R.id.manualUpdateButton).setOnClickListener(view -> {
             toast("正在检查更新");
             ((ElecApplication) getApplication()).requestManualUpdate(this);
@@ -311,6 +313,15 @@ public final class SystemSettingsActivity extends Activity {
         } else {
             toast("反馈邮箱：" + address);
         }
+    }
+
+    /** 打开官方备案查询系统；若手机没有可处理 HTTPS 的应用，则给出明确反馈。 */
+    private void openFilingQuery() {
+        Intent query = new Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse(getString(R.string.app_filing_query_url))
+        );
+        if (!tryStart(query)) toast("暂时无法打开备案查询页面");
     }
 
     private boolean tryStart(Intent intent) {

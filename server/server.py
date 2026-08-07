@@ -2631,6 +2631,8 @@ def product_page(manifest: dict[str, Any]) -> str:
       background:var(--lightning); box-shadow:none; }}
     .footer {{ padding:26px 0 44px; border-top:1px solid var(--line); color:var(--muted);
       text-align:center; font-size:12px; }}
+    .footer a {{ display:inline-block; margin-top:8px; color:var(--brand); font-weight:700;
+      text-underline-offset:3px; }}
     @media(max-width:760px) {{
       .nav {{ height:64px; }} .nav-download {{ padding:9px 13px; font-size:13px; }}
       .hero {{ width:calc(100% - 24px); grid-template-columns:1fr; gap:52px;
@@ -2693,7 +2695,10 @@ def product_page(manifest: dict[str, Any]) -> str:
       </div>
     </section>
   </main>
-  <footer class="footer">zhiSZ · 反馈：3357627169@qq.com</footer>
+  <footer class="footer">zhiSZ · 反馈：3357627169@qq.com<br>
+    <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
+      APP备案号：赣ICP备2026010766号-2A</a>
+  </footer>
 </body>
 </html>"""
 
